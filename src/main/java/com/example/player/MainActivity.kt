@@ -5,27 +5,31 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
-import android.graphics.LinearGradient
-import android.graphics.Shader
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
-import android.util.Size
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.text.TextUtils
+import android.util.Size
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.PathParser
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -38,6 +42,40 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionToken
 import org.json.JSONArray
 import org.json.JSONObject
+
+object P {
+    const val PLAY = "M8 5v14l11-7z"
+    const val PAUSE = "M6 5h4v14H6zM14 5h4v14h-4z"
+    const val NEXT = "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"
+    const val PREV = "M6 6h2v12H6zm3.5 6l8.5 6V6z"
+    const val SHUFFLE = "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"
+    const val REPEAT = "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
+    const val REPEAT_ONE = "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"
+    const val MENU = "M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"
+    const val SHARE = "M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"
+    const val DELETE = "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+    const val ADD = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+    const val CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
+    const val CHECK = "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+    const val TUNE = "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"
+    const val NOTE = "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"
+}
+
+class Ic(ctx: Context, d: String, private var color: Int, private val k: Float = 0.55f) : View(ctx) {
+    private var path: Path = PathParser.createPathFromPathData(d)!!
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    fun setIcon(d: String) { path = PathParser.createPathFromPathData(d)!!; invalidate() }
+    fun tint(c: Int) { color = c; invalidate() }
+    override fun onDraw(c: Canvas) {
+        paint.color = color
+        val s = minOf(width, height) * k / 24f
+        c.save()
+        c.translate((width - 24 * s) / 2f, (height - 24 * s) / 2f)
+        c.scale(s, s)
+        c.drawPath(path, paint)
+        c.restore()
+    }
+}
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -61,27 +99,31 @@ class PlaybackService : MediaSessionService() {
 class MainActivity : Activity() {
     data class Track(val id: Long, val title: String, val artist: String)
 
-    private val presets = arrayOf(
-        arrayOf("#FF2E93", "#7C3AED"), arrayOf("#00E5FF", "#3B82F6"), arrayOf("#B6FF00", "#00C853"),
-        arrayOf("#FF6A00", "#FF1744"), arrayOf("#A855F7", "#FF2E93")
-    )
-    private val presetNames = arrayOf("Розово-фиолетовый", "Циан-синий", "Лайм-зелёный", "Оранжево-красный", "Фиолетово-розовый")
+    private val accents = arrayOf("#1DB954", "#FF2E93", "#00E5FF", "#FF6A00", "#A855F7")
+    private val accentNames = arrayOf("Зелёный", "Розовый", "Голубой", "Оранжевый", "Фиолетовый")
 
     private var all = listOf<Track>()
     private var shown = listOf<Track>()
     private var tab: String? = null
     private val pls = LinkedHashMap<String, MutableList<Long>>()
+    private val sel = LinkedHashSet<Long>()
+    private var selecting = false
+    private var pendingDel: List<Long> = emptyList()
     private lateinit var prefs: SharedPreferences
     private var player: Player? = null
     private val ui = Handler(Looper.getMainLooper())
     private var pi = 0
     private var amoled = false
     private var c1 = 0
-    private var c2 = 0
-    private var onAcc = Color.WHITE
+    private var onAcc = Color.BLACK
+    private var base = Color.BLACK
     private var dragging = false
     private var coverId = -2L
 
+    private val white = Color.parseColor("#FFFFFF")
+    private val grey = Color.parseColor("#B3B3B3")
+
+    private lateinit var topBar: LinearLayout
     private lateinit var tabsBox: LinearLayout
     private lateinit var listView: ListView
     private lateinit var nowTitle: TextView
@@ -89,19 +131,20 @@ class MainActivity : Activity() {
     private lateinit var seek: SeekBar
     private lateinit var curTv: TextView
     private lateinit var durTv: TextView
-    private lateinit var playBtn: TextView
-    private lateinit var shufBtn: TextView
-    private lateinit var repBtn: TextView
+    private lateinit var playIc: Ic
+    private lateinit var shufIc: Ic
+    private lateinit var repIc: Ic
     private lateinit var coverImg: ImageView
-    private lateinit var coverNote: TextView
-
-    private val soft = Color.parseColor("#D8CCF2")
-    private val white = Color.parseColor("#F7F2FF")
+    private lateinit var coverNote: Ic
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun fmt(ms: Long): String { val s = ms / 1000; return String.format("%d:%02d", s / 60, s % 60) }
-    private fun grad(a: Int, b: Int, r: Int, o: GradientDrawable.Orientation = GradientDrawable.Orientation.TL_BR) =
-        GradientDrawable(o, intArrayOf(a, b)).apply { cornerRadius = dp(r).toFloat() }
+    private fun rr(color: Int, r: Int) = GradientDrawable().apply { cornerRadius = dp(r).toFloat(); setColor(color) }
+    private fun mix(c: Int, f: Float) = Color.rgb(
+        (Color.red(c) * f + Color.red(base) * (1 - f)).toInt(),
+        (Color.green(c) * f + Color.green(base) * (1 - f)).toInt(),
+        (Color.blue(c) * f + Color.blue(base) * (1 - f)).toInt())
+    private fun uriOf(id: Long) = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updateNow() }
@@ -114,31 +157,31 @@ class MainActivity : Activity() {
         override fun getView(i: Int, v: View?, p: ViewGroup?): View {
             val t = shown[i]
             val on = player?.currentMediaItem?.mediaId == t.id.toString()
-            val outer = FrameLayout(this@MainActivity).apply { setPadding(dp(16), 0, dp(16), 0) }
-            val row = LinearLayout(this@MainActivity).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(10), dp(14), dp(10))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(18).toFloat()
-                    if (on) { setColor(Color.argb(46, Color.red(c1), Color.green(c1), Color.blue(c1))); setStroke(dp(1), c1) }
-                    else setColor(Color.argb(22, 255, 255, 255))
-                }
-            }
-            val badge = TextView(this@MainActivity).apply {
-                text = if (on && player?.isPlaying == true) "▶" else "♪"
-                textSize = 18f; gravity = Gravity.CENTER
-                setTextColor(if (on) onAcc else soft)
-                background = if (on) grad(c1, c2, 14) else grad(Color.argb(40, 255, 255, 255), Color.argb(20, 255, 255, 255), 14)
-            }
-            row.addView(badge, LinearLayout.LayoutParams(dp(44), dp(44)))
-            val col = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-            col.addView(TextView(this@MainActivity).apply {
+            val ctx = this@MainActivity
+            val outer = FrameLayout(ctx).apply { setPadding(dp(20), dp(6), dp(18), dp(6)) }
+            val row = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
+            val badge = FrameLayout(ctx).apply { background = rr(Color.parseColor("#2A2A2A"), 6) }
+            badge.addView(Ic(ctx, if (on && player?.isPlaying == true) P.PLAY else P.NOTE, if (on) c1 else grey, 0.5f), FrameLayout.LayoutParams(-1, -1))
+            row.addView(badge, LinearLayout.LayoutParams(dp(50), dp(50)))
+            val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(TextView(ctx).apply {
                 text = t.title; textSize = 16f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END
                 setTextColor(if (on) c1 else white)
                 typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             })
-            col.addView(TextView(this@MainActivity).apply { text = t.artist; textSize = 13f; setSingleLine(); setTextColor(soft) })
-            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
+            col.addView(TextView(ctx).apply { text = t.artist; textSize = 13f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END; setTextColor(grey) })
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+            if (selecting) {
+                val picked = sel.contains(t.id)
+                val box = FrameLayout(ctx).apply {
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        if (picked) setColor(c1) else { setColor(Color.TRANSPARENT); setStroke(dp(2), Color.parseColor("#7A7A7A")) }
+                    }
+                }
+                if (picked) box.addView(Ic(ctx, P.CHECK, onAcc, 0.7f), FrameLayout.LayoutParams(-1, -1))
+                row.addView(box, LinearLayout.LayoutParams(dp(26), dp(26)).apply { leftMargin = dp(10) })
+            }
             outer.addView(row)
             return outer
         }
@@ -147,7 +190,7 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("p", MODE_PRIVATE)
-        pi = prefs.getInt("preset", 0).coerceIn(0, presets.size - 1)
+        pi = prefs.getInt("acc", 0).coerceIn(0, accents.size - 1)
         amoled = prefs.getBoolean("amoled", false)
         loadPls()
         build()
@@ -164,6 +207,15 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(code: Int, p: Array<out String>, r: IntArray) {
         super.onRequestPermissionsResult(code, p, r)
         loadTracks()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 77 && resultCode == RESULT_OK) afterDelete(pendingDel)
+    }
+
+    override fun onBackPressed() {
+        if (selecting) endSelect() else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -188,10 +240,10 @@ class MainActivity : Activity() {
         val m = p.currentMediaItem
         nowTitle.text = m?.mediaMetadata?.title ?: "Выберите трек"
         nowArtist.text = m?.mediaMetadata?.artist ?: ""
-        playBtn.text = if (p.isPlaying) "❚❚" else "▶"
-        shufBtn.setTextColor(if (p.shuffleModeEnabled) c1 else soft)
-        repBtn.setTextColor(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else soft)
-        repBtn.text = if (p.repeatMode == Player.REPEAT_MODE_ONE) "🔂" else "🔁"
+        playIc.setIcon(if (p.isPlaying) P.PAUSE else P.PLAY)
+        shufIc.tint(if (p.shuffleModeEnabled) c1 else grey)
+        repIc.setIcon(if (p.repeatMode == Player.REPEAT_MODE_ONE) P.REPEAT_ONE else P.REPEAT)
+        repIc.tint(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else grey)
         trackAdapter.notifyDataSetChanged()
         loadCover()
     }
@@ -205,8 +257,7 @@ class MainActivity : Activity() {
         if (id < 0 || Build.VERSION.SDK_INT < 29) return
         Thread {
             try {
-                val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                val bmp = contentResolver.loadThumbnail(uri, Size(600, 600), null)
+                val bmp = contentResolver.loadThumbnail(uriOf(id), Size(600, 600), null)
                 runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverNote.visibility = View.GONE } }
             } catch (e: Exception) { }
         }.start()
@@ -231,11 +282,10 @@ class MainActivity : Activity() {
 
     private fun loadTracks() {
         val list = ArrayList<Track>()
-        val base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         val col = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST)
         val sel = "(" + MediaStore.Audio.Media.IS_MUSIC + " != 0 OR " + MediaStore.Audio.Media.MIME_TYPE + " = 'audio/mpeg') AND " + MediaStore.Audio.Media.DURATION + " > 30000"
         try {
-            contentResolver.query(base, col, sel, null, MediaStore.Audio.Media.TITLE + " COLLATE NOCASE")?.use { c ->
+            contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, col, sel, null, MediaStore.Audio.Media.TITLE + " COLLATE NOCASE")?.use { c ->
                 while (c.moveToNext()) {
                     val art = c.getString(2) ?: ""
                     list.add(Track(c.getLong(0), c.getString(1) ?: "Без названия", if (art == "<unknown>") "" else art))
@@ -249,7 +299,7 @@ class MainActivity : Activity() {
 
     private fun item(t: Track): MediaItem = MediaItem.Builder()
         .setMediaId(t.id.toString())
-        .setUri(ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, t.id))
+        .setUri(uriOf(t.id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(t.title).setArtist(t.artist).build())
         .build()
 
@@ -280,8 +330,39 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun refreshTop() {
+        topBar.removeAllViews()
+        fun btn(d: String, f: () -> Unit) = topBar.addView(
+            Ic(this, d, white, 0.5f).apply { setOnClickListener { f() } }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        if (!selecting) {
+            topBar.addView(TextView(this).apply { text = "Плеер"; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
+                LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            btn(P.MENU) { selecting = true; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged() }
+            btn(P.TUNE) { settings() }
+        } else {
+            btn(P.CLOSE) { endSelect() }
+            topBar.addView(TextView(this).apply { text = "Выбрано: " + sel.size; textSize = 18f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
+                LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
+            btn(P.CHECK) { if (sel.size == shown.size) sel.clear() else sel.addAll(shown.map { it.id }); refreshTop(); trackAdapter.notifyDataSetChanged() }
+            btn(P.ADD) { if (sel.isEmpty()) toast("Сначала выберите песни") else addToPlaylist(sel.toList()) }
+            btn(P.SHARE) { if (sel.isEmpty()) toast("Сначала выберите песни") else share(sel.toList()) }
+            btn(P.DELETE) { if (sel.isEmpty()) toast("Сначала выберите песни") else confirmDelete(sel.toList()) }
+        }
+    }
+
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+
+    private fun endSelect() {
+        selecting = false; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged()
+    }
+
+    private fun toggleSel(t: Track) {
+        if (!sel.remove(t.id)) sel.add(t.id)
+        refreshTop(); trackAdapter.notifyDataSetChanged()
+    }
+
     private fun plMenu(n: String) {
-        AlertDialog.Builder(this).setTitle(n).setItems(arrayOf("Переименовать", "Удалить")) { _, w ->
+        AlertDialog.Builder(this).setTitle(n).setItems(arrayOf("Переименовать", "Удалить плейлист")) { _, w ->
             if (w == 0) ask("Название", n) { nn ->
                 val l = pls.remove(n) ?: mutableListOf()
                 pls[nn] = l
@@ -296,23 +377,64 @@ class MainActivity : Activity() {
     }
 
     private fun trackMenu(t: Track) {
-        val cur = tab
-        if (cur != null) {
-            AlertDialog.Builder(this).setTitle(t.title).setItems(arrayOf("Убрать из плейлиста")) { _, _ ->
-                pls[cur]?.remove(t.id); savePls(); refreshList()
-            }.show()
-            return
-        }
-        val names = pls.keys.toList()
-        val opts = names.map { "В плейлист «$it»" } + "Новый плейлист…"
+        val opts = mutableListOf("Выбрать несколько", "Добавить в плейлист", "Поделиться", "Удалить с устройства")
+        if (tab != null) opts.add(0, "Убрать из плейлиста")
         AlertDialog.Builder(this).setTitle(t.title).setItems(opts.toTypedArray()) { _, w ->
+            when (opts[w]) {
+                "Убрать из плейлиста" -> { pls[tab!!]?.remove(t.id); savePls(); refreshList() }
+                "Выбрать несколько" -> { selecting = true; sel.clear(); sel.add(t.id); refreshTop(); trackAdapter.notifyDataSetChanged() }
+                "Добавить в плейлист" -> addToPlaylist(listOf(t.id))
+                "Поделиться" -> share(listOf(t.id))
+                "Удалить с устройства" -> confirmDelete(listOf(t.id))
+            }
+        }.show()
+    }
+
+    private fun addToPlaylist(ids: List<Long>) {
+        val names = pls.keys.toList()
+        val opts = names + "＋ Новый плейлист…"
+        AlertDialog.Builder(this).setTitle("Добавить в плейлист").setItems(opts.toTypedArray()) { _, w ->
             if (w < names.size) {
                 val l = pls[names[w]]!!
-                if (!l.contains(t.id)) l.add(t.id)
-                savePls()
-                Toast.makeText(this, "Добавлено", Toast.LENGTH_SHORT).show()
-            } else ask("Новый плейлист", "") { n -> pls[n] = mutableListOf(t.id); savePls(); refreshTabs() }
+                for (id in ids) if (!l.contains(id)) l.add(id)
+                savePls(); toast("Добавлено: " + ids.size); endSelect()
+            } else ask("Новый плейлист", "") { n -> pls[n] = ids.toMutableList(); savePls(); refreshTabs(); toast("Плейлист создан"); endSelect() }
         }.show()
+    }
+
+    private fun share(ids: List<Long>) {
+        val i = if (ids.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uriOf(ids[0]))
+        else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(ids.map { uriOf(it) }))
+        i.type = "audio/*"
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(i, "Поделиться"))
+    }
+
+    private fun confirmDelete(ids: List<Long>) {
+        AlertDialog.Builder(this).setTitle("Удалить с устройства?")
+            .setMessage("Файлов: " + ids.size + ". Это нельзя отменить.")
+            .setPositiveButton("Удалить") { _, _ -> doDelete(ids) }
+            .setNegativeButton("Отмена", null).show()
+    }
+
+    private fun doDelete(ids: List<Long>) {
+        val uris = ids.map { uriOf(it) }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                pendingDel = ids
+                val pi = MediaStore.createDeleteRequest(contentResolver, uris)
+                startIntentSenderForResult(pi.intentSender, 77, null, 0, 0, 0)
+            } else {
+                for (u in uris) contentResolver.delete(u, null, null)
+                afterDelete(ids)
+            }
+        } catch (e: Exception) { toast("Не удалось удалить файл") }
+    }
+
+    private fun afterDelete(ids: List<Long>) {
+        val cur = player?.currentMediaItem?.mediaId?.toLongOrNull()
+        if (cur != null && ids.contains(cur)) { player?.stop(); player?.clearMediaItems() }
+        endSelect(); loadTracks()
     }
 
     private fun ask(title: String, init: String, ok: (String) -> Unit) {
@@ -323,13 +445,13 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        AlertDialog.Builder(this).setTitle("Внешний вид").setItems(arrayOf("Цветовая схема", "Фон")) { _, w ->
+        AlertDialog.Builder(this).setTitle("Внешний вид").setItems(arrayOf("Цвет акцента", "Фон")) { _, w ->
             if (w == 0) {
-                AlertDialog.Builder(this).setItems(presetNames) { _, i ->
-                    pi = i; prefs.edit().putInt("preset", pi).apply(); rebuild()
+                AlertDialog.Builder(this).setItems(accentNames) { _, i ->
+                    pi = i; prefs.edit().putInt("acc", pi).apply(); rebuild()
                 }.show()
             } else {
-                AlertDialog.Builder(this).setItems(arrayOf("Неон (фиолетовая ночь)", "AMOLED (чёрный)")) { _, i ->
+                AlertDialog.Builder(this).setItems(arrayOf("Тёмный (как в Spotify)", "AMOLED (чёрный)")) { _, i ->
                     amoled = i == 1; prefs.edit().putBoolean("amoled", amoled).apply(); rebuild()
                 }.show()
             }
@@ -340,98 +462,82 @@ class MainActivity : Activity() {
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
         text = t; textSize = 14f; typeface = Typeface.DEFAULT_BOLD
-        setTextColor(if (on) onAcc else soft)
-        setPadding(dp(16), dp(9), dp(16), dp(9))
-        background = if (on) grad(c1, c2, 22, GradientDrawable.Orientation.LEFT_RIGHT)
-        else GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(Color.argb(28, 255, 255, 255)); setStroke(dp(1), Color.argb(50, 255, 255, 255)) }
+        setTextColor(if (on) onAcc else white)
+        setPadding(dp(16), dp(8), dp(16), dp(8))
+        background = rr(if (on) c1 else Color.parseColor("#2A2A2A"), 20)
         setOnClickListener { f() }
-    }
-
-    private fun ic(t: String, f: () -> Unit) = TextView(this).apply {
-        text = t; textSize = 24f; gravity = Gravity.CENTER; setTextColor(soft)
-        setOnClickListener { f() }
-    }
-
-    private fun glow(v: View, color: Int, elev: Int) {
-        v.elevation = dp(elev).toFloat()
-        if (Build.VERSION.SDK_INT >= 28) { v.outlineAmbientShadowColor = color; v.outlineSpotShadowColor = color }
     }
 
     private fun build() {
-        c1 = Color.parseColor(presets[pi][0])
-        c2 = Color.parseColor(presets[pi][1])
-        onAcc = if (pi == 2) Color.BLACK else Color.WHITE
-        val base = if (amoled) Color.BLACK else Color.parseColor("#07030F")
-        fun mix(c: Int, f: Float) = Color.rgb(
-            (Color.red(c) * f + Color.red(base) * (1 - f)).toInt(),
-            (Color.green(c) * f + Color.green(base) * (1 - f)).toInt(),
-            (Color.blue(c) * f + Color.blue(base) * (1 - f)).toInt())
-        val top = mix(c1, if (amoled) 0.12f else 0.34f)
-        val panelCol = mix(c1, if (amoled) 0.06f else 0.14f)
+        c1 = Color.parseColor(accents[pi])
+        onAcc = if (pi == 4) Color.WHITE else Color.BLACK
+        base = if (amoled) Color.BLACK else Color.parseColor("#121212")
+        val top = mix(c1, if (amoled) 0.18f else 0.40f)
+        val panelCol = mix(Color.WHITE, 0.07f)
         window.statusBarColor = top
         window.navigationBarColor = panelCol
         window.decorView.systemUiVisibility = 0
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, mix(c2, 0.10f), base))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, base, base))
         }
+        topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(8), dp(8), dp(4)) }
+        root.addView(topBar, LinearLayout.LayoutParams(-1, -2))
 
-        val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(14), dp(20), dp(16)) }
-        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(TextView(this).apply {
-            text = "ПЛЕЕР"; textSize = 28f; typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.12f
-            paint.shader = LinearGradient(0f, 0f, dp(150).toFloat(), 0f, c1, c2, Shader.TileMode.CLAMP)
-            setShadowLayer(dp(10).toFloat(), 0f, 0f, c1)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        head.addView(chip("Стиль", false) { settings() })
-        header.addView(head)
-
+        val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(6), dp(24), dp(14)) }
         val hs = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         tabsBox = LinearLayout(this)
         hs.addView(tabsBox)
-        header.addView(hs, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+        header.addView(hs, LinearLayout.LayoutParams(-1, -2))
 
-        val side = minOf(resources.displayMetrics.widthPixels - dp(100), dp(300))
+        val side = resources.displayMetrics.widthPixels - dp(48)
         val box = FrameLayout(this).apply {
-            background = grad(c1, c2, 30)
+            background = rr(mix(c1, 0.55f), 12)
             clipToOutline = true
+            elevation = dp(18).toFloat()
         }
-        glow(box, c1, 22)
         coverImg = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-        coverNote = TextView(this).apply { text = "♪"; textSize = 90f; gravity = Gravity.CENTER; setTextColor(Color.argb(210, 255, 255, 255)) }
+        coverNote = Ic(this, P.NOTE, Color.argb(200, 255, 255, 255), 0.4f)
         box.addView(coverImg, FrameLayout.LayoutParams(-1, -1))
         box.addView(coverNote, FrameLayout.LayoutParams(-1, -1))
-        header.addView(box, LinearLayout.LayoutParams(side, side).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(26) })
+        header.addView(box, LinearLayout.LayoutParams(side, side).apply { topMargin = dp(18) })
 
-        nowTitle = TextView(this).apply { text = "Выберите трек"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER }
-        nowArtist = TextView(this).apply { textSize = 15f; setTextColor(soft); setSingleLine(); gravity = Gravity.CENTER }
-        header.addView(nowTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
+        nowTitle = TextView(this).apply { text = "Выберите трек"; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END }
+        nowArtist = TextView(this).apply { textSize = 15f; setTextColor(grey); setSingleLine(); ellipsize = TextUtils.TruncateAt.END }
+        header.addView(nowTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20) })
         header.addView(nowArtist, LinearLayout.LayoutParams(-1, -2))
 
         listView = ListView(this).apply {
             divider = ColorDrawable(Color.TRANSPARENT)
-            dividerHeight = dp(8)
+            dividerHeight = 0
             selector = ColorDrawable(Color.TRANSPARENT)
             setCacheColorHint(Color.TRANSPARENT)
             isVerticalScrollBarEnabled = false
             addHeaderView(header, null, false)
             setAdapter(trackAdapter)
-            setOnItemClickListener { _, _, pos, _ -> val i = pos - headerViewsCount; if (i >= 0 && i < shown.size) playFrom(i) }
-            setOnItemLongClickListener { _, _, pos, _ -> val i = pos - headerViewsCount; if (i >= 0 && i < shown.size) trackMenu(shown[i]); true }
+            setOnItemClickListener { _, _, pos, _ ->
+                val i = pos - headerViewsCount
+                if (i >= 0 && i < shown.size) { if (selecting) toggleSel(shown[i]) else playFrom(i) }
+            }
+            setOnItemLongClickListener { _, _, pos, _ ->
+                val i = pos - headerViewsCount
+                if (i >= 0 && i < shown.size) { if (selecting) toggleSel(shown[i]) else trackMenu(shown[i]) }
+                true
+            }
         }
         root.addView(listView, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val r = dp(28).toFloat()
+        val r = dp(22).toFloat()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(14), dp(20), dp(12))
+            setPadding(dp(18), dp(12), dp(18), dp(12))
             background = GradientDrawable().apply { setColor(panelCol); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f) }
+            elevation = dp(12).toFloat()
         }
-        glow(panel, c1, 16)
         seek = SeekBar(this).apply {
             progressTintList = ColorStateList.valueOf(c1)
-            thumbTintList = ColorStateList.valueOf(c2)
+            thumbTintList = ColorStateList.valueOf(white)
             progressBackgroundTintList = ColorStateList.valueOf(Color.argb(70, 255, 255, 255))
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) {}
@@ -439,38 +545,38 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(s: SeekBar) { dragging = false; player?.seekTo(s.progress * 1000L) }
             })
         }
-        curTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(soft) }
-        durTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(soft) }
+        curTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(grey) }
+        durTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(grey) }
         val seekRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         seekRow.addView(curTv)
         seekRow.addView(seek, LinearLayout.LayoutParams(0, -2, 1f))
         seekRow.addView(durTv)
         panel.addView(seekRow)
 
-        shufBtn = ic("🔀") { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
-        val prev = ic("⏮") { player?.seekToPrevious() }
-        prev.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(30, 255, 255, 255)) }
-        playBtn = ic("▶") { player?.let { if (it.isPlaying) it.pause() else it.play() } }
-        playBtn.setTextColor(onAcc)
-        playBtn.textSize = 28f
-        playBtn.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(c1, c2)).apply { shape = GradientDrawable.OVAL }
-        glow(playBtn, c1, 14)
-        val next = ic("⏭") { player?.seekToNext() }
-        next.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(30, 255, 255, 255)) }
-        repBtn = ic("🔁") {
-            player?.let {
-                it.repeatMode = when (it.repeatMode) {
-                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                    else -> Player.REPEAT_MODE_OFF
+        shufIc = Ic(this, P.SHUFFLE, grey, 0.55f).apply { setOnClickListener { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } } }
+        val prev = Ic(this, P.PREV, white, 0.6f).apply { setOnClickListener { player?.seekToPrevious() } }
+        playIc = Ic(this, P.PLAY, Color.BLACK, 0.55f).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+            setOnClickListener { player?.let { if (it.isPlaying) it.pause() else it.play() } }
+        }
+        val next = Ic(this, P.NEXT, white, 0.6f).apply { setOnClickListener { player?.seekToNext() } }
+        repIc = Ic(this, P.REPEAT, grey, 0.55f).apply {
+            setOnClickListener {
+                player?.let {
+                    it.repeatMode = when (it.repeatMode) {
+                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                        else -> Player.REPEAT_MODE_OFF
+                    }
                 }
             }
         }
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(6); rightMargin = dp(6) })
-        cell(shufBtn, 46); cell(prev, 54); cell(playBtn, 74); cell(next, 54); cell(repBtn, 46)
-        panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(8); rightMargin = dp(8) })
+        cell(shufIc, 48); cell(prev, 56); cell(playIc, 66); cell(next, 56); cell(repIc, 48)
+        panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         root.addView(panel, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
+        refreshTop()
     }
 }
