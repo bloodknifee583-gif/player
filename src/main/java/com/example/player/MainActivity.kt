@@ -44,6 +44,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object P {
+    const val STAR = "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+    const val GLOBE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"
     const val BACK = "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"
     const val RELOAD = "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
     const val PIP = "M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"
@@ -135,7 +137,7 @@ class MainActivity : Activity() {
         Theme("Лайм", "#0B1100", "#B6FF00"), Theme("Океан", "#050F1F", "#3B82F6"), Theme("Рубин", "#150507", "#FF1744"),
         Theme("Золото", "#15110A", "#FFC107"), Theme("Мята", "#07140F", "#2DD4BF"), Theme("Сакура", "#1A0F14", "#FF8FB1"),
         Theme("Лаванда", "#120F1F", "#B39DDB"), Theme("Кофе", "#1A130E", "#D7A86E"), Theme("Лес", "#0A140C", "#7CB342"),
-        Theme("Графит", "#1C1D21", "#9AA5B1"), Theme("Светлая", "#F5F5F7", "#1DB954", false), Theme("Бумага", "#F4EFE6", "#D2691E", false)
+        Theme("Графит", "#1C1D21", "#9AA5B1"), Theme("Светлая", "#F5F5F7", "#1DB954", false), Theme("Бумага", "#F4EFE6", "#D2691E", false), Theme("Свой", "#121212", "#1DB954")
     )
 
     private var all = listOf<Track>()
@@ -160,7 +162,12 @@ class MainActivity : Activity() {
     private var bass: android.media.audiofx.BassBoost? = null
     private var rootV: View? = null
     private var panelV: View? = null
-    private var web: android.webkit.WebView? = null
+    private val webs = HashMap<String, android.webkit.WebView>()
+    private var webKind = "yt"
+    private val web: android.webkit.WebView? get() = webs[webKind]
+    private var urlEt: EditText? = null
+    private var customAcc = Color.parseColor("#1DB954")
+    private var customBg = Color.parseColor("#121212")
     private var ytMode = false
     private var customView: View? = null
     private var customCb: android.webkit.WebChromeClient.CustomViewCallback? = null
@@ -257,6 +264,8 @@ class MainActivity : Activity() {
         super.onCreate(b)
         prefs = getSharedPreferences("p", MODE_PRIVATE)
         ti = prefs.getInt("theme", 0).coerceIn(0, themes.size - 1)
+        customAcc = prefs.getInt("cacc", customAcc)
+        customBg = prefs.getInt("cbg", customBg)
         sortMode = prefs.getInt("sort", 0)
         try { (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { favs.add(it.toLong()) } } catch (e: Exception) { }
         try { val o = JSONObject(prefs.getString("plays", "{}") ?: "{}"); for (k in o.keys()) plays[k.toLong()] = o.getInt(k) } catch (e: Exception) { }
@@ -294,7 +303,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
         eq?.release(); bass?.release()
-        web?.destroy()
+        for (w in webs.values) w.destroy()
         (player as? MediaController)?.release()
         super.onDestroy()
     }
@@ -435,19 +444,36 @@ class MainActivity : Activity() {
             Ic(this, d, white, 0.5f).apply { setOnClickListener { f() } }, LinearLayout.LayoutParams(dp(46), dp(46)))
         if (ytMode) {
             btn(P.BACK) { if (web?.canGoBack() == true) web?.goBack() else setYt(false) }
-            topBar.addView(TextView(this).apply { text = "YouTube"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
-                LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
-            btn(P.RELOAD) { web?.reload() }
-            btn(P.PIP) { pip() }
+            if (webKind == "yt") {
+                topBar.addView(TextView(this).apply { text = "YouTube"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
+                    LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
+                btn(P.RELOAD) { web?.reload() }
+                btn(P.PIP) { pip() }
+            } else {
+                val et = EditText(this).apply {
+                    setSingleLine(); setTextColor(white); setHintTextColor(grey); hint = "Поиск или адрес"; textSize = 14f
+                    imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+                    setPadding(dp(14), 0, dp(14), 0)
+                    background = rr(card, 20)
+                    setText(web?.url ?: "")
+                    setOnEditorActionListener { v, _, _ -> openUrl(v.text.toString()); true }
+                }
+                urlEt = et
+                topBar.addView(et, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(4); rightMargin = dp(4) })
+                btn(P.RELOAD) { web?.reload() }
+                btn(P.STAR) { bookmarks() }
+            }
             btn(P.CLOSE) { setYt(false) }
             return
         }
         if (!selecting) {
             topBar.addView(TextView(this).apply { text = "Плеер"; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
-            val yt = FrameLayout(this).apply { setOnClickListener { setYt(true) } }
+            val yt = FrameLayout(this).apply { setOnClickListener { openWeb("yt") } }
             yt.addView(Ic(this, P.PLAY, Color.WHITE, 0.55f).apply { background = rr(Color.parseColor("#FF0033"), 8) }, FrameLayout.LayoutParams(dp(34), dp(24), Gravity.CENTER))
             topBar.addView(yt, LinearLayout.LayoutParams(dp(48), dp(46)))
+            btn(P.GLOBE) { openWeb("br") }
             btn(P.SEARCH) { ask("Поиск", query) { q -> query = q; refreshTabs(); refreshList() } }
             btn(P.MENU) { selecting = true; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged() }
             btn(P.TUNE) { settings() }
@@ -516,11 +542,12 @@ class MainActivity : Activity() {
         var line: LinearLayout? = null
         themes.forEachIndexed { i, th ->
             if (i % 3 == 0) { line = LinearLayout(this); box.addView(line, LinearLayout.LayoutParams(-1, -2)) }
-            val bgc = Color.parseColor(th.bg)
-            val ac = Color.parseColor(th.acc)
+            val cu = i == themes.size - 1
+            val bgc = if (cu) customBg else Color.parseColor(th.bg)
+            val ac = if (cu) customAcc else Color.parseColor(th.acc)
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(6), dp(6), dp(6), dp(8))
-                setOnClickListener { d.dismiss(); ti = i; prefs.edit().putInt("theme", i).apply(); rebuild() }
+                setOnClickListener { d.dismiss(); if (cu) colorEditor() else { ti = i; prefs.edit().putInt("theme", i).apply(); rebuild() } }
             }
             val sw = FrameLayout(this).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(bgc); setStroke(dp(if (i == ti) 3 else 1), if (i == ti) ac else Color.argb(70, 128, 128, 128)) }
@@ -830,24 +857,119 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun mkWeb(kind: String): android.webkit.WebView {
+        val w = android.webkit.WebView(this)
+        w.settings.javaScriptEnabled = true
+        w.settings.domStorageEnabled = true
+        w.settings.mediaPlaybackRequiresUserGesture = false
+        w.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                if (kind == "br" && webKind == "br") urlEt?.setText(url ?: "")
+            }
+        }
+        w.webChromeClient = ytChrome
+        w.loadUrl(if (kind == "yt") "https://m.youtube.com" else "https://www.google.com")
+        (listView.parent as? LinearLayout)?.addView(w, LinearLayout.LayoutParams(-1, 0, 1f))
+        return w
+    }
+
+    private fun openWeb(kind: String) {
+        webKind = kind
+        if (kind == "yt") player?.pause()
+        setYt(true)
+    }
+
     private fun setYt(on: Boolean) {
         ytMode = on
-        if (on && web == null) {
-            val w = android.webkit.WebView(this)
-            w.settings.javaScriptEnabled = true
-            w.settings.domStorageEnabled = true
-            w.settings.mediaPlaybackRequiresUserGesture = false
-            w.webViewClient = android.webkit.WebViewClient()
-            w.webChromeClient = ytChrome
-            w.loadUrl("https://m.youtube.com")
-            (listView.parent as? LinearLayout)?.addView(w, LinearLayout.LayoutParams(-1, 0, 1f))
-            web = w
-        }
-        if (on) player?.pause()
+        if (on && web == null) webs[webKind] = mkWeb(webKind)
         listView.visibility = if (on) View.GONE else View.VISIBLE
         panelV?.visibility = if (on) View.GONE else View.VISIBLE
-        web?.visibility = if (on) View.VISIBLE else View.GONE
+        for ((k, w) in webs) w.visibility = if (on && k == webKind) View.VISIBLE else View.GONE
         refreshTop()
+    }
+
+    private fun openUrl(t: String) {
+        val q = t.trim()
+        if (q.isEmpty()) return
+        val url = when {
+            q.startsWith("http://") || q.startsWith("https://") -> q
+            q.contains(".") && !q.contains(" ") -> "https://" + q
+            else -> "https://www.google.com/search?q=" + android.net.Uri.encode(q)
+        }
+        web?.loadUrl(url)
+        urlEt?.clearFocus()
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(urlEt?.windowToken, 0)
+    }
+
+    private fun saveBm(l: List<Pair<String, String>>) {
+        prefs.edit().putString("bm", l.joinToString("\n") { it.first + "|" + it.second }).apply()
+    }
+
+    private fun bookmarks() {
+        val list = ArrayList<Pair<String, String>>()
+        (prefs.getString("bm", "") ?: "").split("\n").filter { it.contains("|") }.forEach { list.add(Pair(it.substringBefore("|"), it.substringAfter("|"))) }
+        if (list.isEmpty()) {
+            list.add(Pair("Google", "https://www.google.com"))
+            list.add(Pair("YouTube", "https://m.youtube.com"))
+            list.add(Pair("Википедия", "https://ru.wikipedia.org"))
+            list.add(Pair("GitHub", "https://github.com"))
+        }
+        val rows = ArrayList<Triple<String, String, () -> Unit>>()
+        rows.add(row(P.ADD, "Добавить эту страницу") {
+            val u = web?.url ?: ""
+            val t = web?.title ?: u
+            if (u.isNotEmpty()) { list.add(Pair(t.replace("|", " ").replace("\n", " "), u)); saveBm(list); toast("Закладка добавлена") }
+        })
+        for (b in list) rows.add(row(P.STAR, b.first) { web?.loadUrl(b.second) })
+        rows.add(row(P.DELETE, "Очистить закладки") { prefs.edit().remove("bm").apply(); toast("Закладки очищены") })
+        sheet("Закладки", rows)
+    }
+
+    private fun colorEditor() {
+        val d = android.app.Dialog(this)
+        val box = sheetBox("Свои цвета")
+        val ah = FloatArray(3)
+        val bh = FloatArray(3)
+        Color.colorToHSV(customAcc, ah)
+        Color.colorToHSV(customBg, bh)
+        val prev = FrameLayout(this)
+        val dot = View(this)
+        prev.addView(dot, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
+        fun upd() {
+            customAcc = Color.HSVToColor(ah)
+            customBg = Color.HSVToColor(bh)
+            prev.background = rr(customBg, 16)
+            dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(customAcc) }
+        }
+        fun slider(label: String, arr: FloatArray, i: Int, top: Int, scale: Float) {
+            box.addView(TextView(this).apply { text = label; textSize = 13f; setTextColor(grey); setPadding(dp(14), dp(8), dp(14), 0) })
+            box.addView(SeekBar(this).apply {
+                this.max = top
+                progress = (arr[i] * scale).toInt()
+                progressTintList = ColorStateList.valueOf(c1)
+                thumbTintList = ColorStateList.valueOf(c1)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) { arr[i] = p / scale; upd() }
+                    override fun onStartTrackingTouch(s: SeekBar) {}
+                    override fun onStopTrackingTouch(s: SeekBar) {}
+                })
+            })
+        }
+        box.addView(prev, LinearLayout.LayoutParams(-1, dp(72)).apply { bottomMargin = dp(6) })
+        slider("Акцент: оттенок", ah, 0, 360, 1f)
+        slider("Акцент: насыщенность", ah, 1, 100, 100f)
+        slider("Акцент: яркость", ah, 2, 100, 100f)
+        slider("Фон: оттенок", bh, 0, 360, 1f)
+        slider("Фон: насыщенность", bh, 1, 100, 100f)
+        slider("Фон: яркость", bh, 2, 100, 100f)
+        upd()
+        box.addView(ichip(P.CHECK, "Применить", true) {
+            d.dismiss()
+            ti = themes.size - 1
+            prefs.edit().putInt("cacc", customAcc).putInt("cbg", customBg).putInt("theme", ti).apply()
+            rebuild()
+        }, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(14) })
+        present(d, box)
     }
 
     private fun pip() {
@@ -859,7 +981,7 @@ class MainActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (ytMode) pip()
+        if (ytMode && webKind == "yt") pip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
@@ -879,9 +1001,10 @@ class MainActivity : Activity() {
 
     private fun build() {
         val th = themes[ti]
-        dark = th.dark
-        c1 = Color.parseColor(th.acc)
-        base = Color.parseColor(th.bg)
+        val cu = ti == themes.size - 1
+        c1 = if (cu) customAcc else Color.parseColor(th.acc)
+        base = if (cu) customBg else Color.parseColor(th.bg)
+        dark = if (cu) androidx.core.graphics.ColorUtils.calculateLuminance(customBg) < 0.5 else th.dark
         onAcc = if (androidx.core.graphics.ColorUtils.calculateLuminance(c1) > 0.45) Color.BLACK else Color.WHITE
         white = Color.parseColor(if (dark) "#FFFFFF" else "#191919")
         grey = Color.parseColor(if (dark) "#B3B3B3" else "#6B6B6B")
@@ -1001,10 +1124,9 @@ class MainActivity : Activity() {
         panel.addView(row2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         root.addView(panel, LinearLayout.LayoutParams(-1, -2))
         panelV = panel
-        web?.let { w -> (w.parent as? ViewGroup)?.removeView(w); root.addView(w, LinearLayout.LayoutParams(-1, 0, 1f)) }
+        for ((k, w) in webs) { (w.parent as? ViewGroup)?.removeView(w); root.addView(w, LinearLayout.LayoutParams(-1, 0, 1f)); w.visibility = if (ytMode && k == webKind) View.VISIBLE else View.GONE }
         listView.visibility = if (ytMode) View.GONE else View.VISIBLE
         panel.visibility = if (ytMode) View.GONE else View.VISIBLE
-        web?.visibility = if (ytMode) View.VISIBLE else View.GONE
         setContentView(root)
         refreshTop()
     }
