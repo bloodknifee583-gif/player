@@ -44,6 +44,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object P {
+    const val BACK = "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"
+    const val RELOAD = "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+    const val PIP = "M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"
     const val PALETTE = "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"
     const val SORT = "M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z"
     const val BOLT = "M7 2v11h3v9l7-12h-4l4-8z"
@@ -156,6 +159,11 @@ class MainActivity : Activity() {
     private var eq: android.media.audiofx.Equalizer? = null
     private var bass: android.media.audiofx.BassBoost? = null
     private var rootV: View? = null
+    private var panelV: View? = null
+    private var web: android.webkit.WebView? = null
+    private var ytMode = false
+    private var customView: View? = null
+    private var customCb: android.webkit.WebChromeClient.CustomViewCallback? = null
     private var restored = false
     private var sleepRun: Runnable? = null
     private lateinit var speedTv: TextView
@@ -276,7 +284,9 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        if (selecting) endSelect() else super.onBackPressed()
+        if (customView != null) { customCb?.onCustomViewHidden(); ytChrome.onHideCustomView() }
+        else if (ytMode) { if (web?.canGoBack() == true) web?.goBack() else setYt(false) }
+        else if (selecting) endSelect() else super.onBackPressed()
     }
 
     override fun onStop() { saveLast(); super.onStop() }
@@ -284,6 +294,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
         eq?.release(); bass?.release()
+        web?.destroy()
         (player as? MediaController)?.release()
         super.onDestroy()
     }
@@ -422,9 +433,21 @@ class MainActivity : Activity() {
         topBar.removeAllViews()
         fun btn(d: String, f: () -> Unit) = topBar.addView(
             Ic(this, d, white, 0.5f).apply { setOnClickListener { f() } }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        if (ytMode) {
+            btn(P.BACK) { if (web?.canGoBack() == true) web?.goBack() else setYt(false) }
+            topBar.addView(TextView(this).apply { text = "YouTube"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
+                LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
+            btn(P.RELOAD) { web?.reload() }
+            btn(P.PIP) { pip() }
+            btn(P.CLOSE) { setYt(false) }
+            return
+        }
         if (!selecting) {
             topBar.addView(TextView(this).apply { text = "Плеер"; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            val yt = FrameLayout(this).apply { setOnClickListener { setYt(true) } }
+            yt.addView(Ic(this, P.PLAY, Color.WHITE, 0.55f).apply { background = rr(Color.parseColor("#FF0033"), 8) }, FrameLayout.LayoutParams(dp(34), dp(24), Gravity.CENTER))
+            topBar.addView(yt, LinearLayout.LayoutParams(dp(48), dp(46)))
             btn(P.SEARCH) { ask("Поиск", query) { q -> query = q; refreshTabs(); refreshList() } }
             btn(P.MENU) { selecting = true; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged() }
             btn(P.TUNE) { settings() }
@@ -793,6 +816,57 @@ class MainActivity : Activity() {
         return lay
     }
 
+    private val ytChrome = object : android.webkit.WebChromeClient() {
+        override fun onShowCustomView(v: View, cb: android.webkit.WebChromeClient.CustomViewCallback) {
+            customView = v
+            customCb = cb
+            (window.decorView as ViewGroup).addView(v, ViewGroup.LayoutParams(-1, -1))
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
+        override fun onHideCustomView() {
+            customView?.let { (window.decorView as ViewGroup).removeView(it) }
+            customView = null
+            window.decorView.systemUiVisibility = if (dark) 0 else (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or 0x10)
+        }
+    }
+
+    private fun setYt(on: Boolean) {
+        ytMode = on
+        if (on && web == null) {
+            val w = android.webkit.WebView(this)
+            w.settings.javaScriptEnabled = true
+            w.settings.domStorageEnabled = true
+            w.settings.mediaPlaybackRequiresUserGesture = false
+            w.webViewClient = android.webkit.WebViewClient()
+            w.webChromeClient = ytChrome
+            w.loadUrl("https://m.youtube.com")
+            (listView.parent as? LinearLayout)?.addView(w, LinearLayout.LayoutParams(-1, 0, 1f))
+            web = w
+        }
+        if (on) player?.pause()
+        listView.visibility = if (on) View.GONE else View.VISIBLE
+        panelV?.visibility = if (on) View.GONE else View.VISIBLE
+        web?.visibility = if (on) View.VISIBLE else View.GONE
+        refreshTop()
+    }
+
+    private fun pip() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build())
+            else toast("Окошко поверх приложений работает на Android 8 и новее")
+        } catch (e: Exception) { toast("Не удалось открыть окошко") }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (ytMode) pip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+    }
+
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
@@ -926,6 +1000,11 @@ class MainActivity : Activity() {
         for (v in listOf<View>(back10, heartIc, speedTv, timer, fwd10)) row2.addView(v, LinearLayout.LayoutParams(dp(52), dp(44)))
         panel.addView(row2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         root.addView(panel, LinearLayout.LayoutParams(-1, -2))
+        panelV = panel
+        web?.let { w -> (w.parent as? ViewGroup)?.removeView(w); root.addView(w, LinearLayout.LayoutParams(-1, 0, 1f)) }
+        listView.visibility = if (ytMode) View.GONE else View.VISIBLE
+        panel.visibility = if (ytMode) View.GONE else View.VISIBLE
+        web?.visibility = if (ytMode) View.VISIBLE else View.GONE
         setContentView(root)
         refreshTop()
     }
