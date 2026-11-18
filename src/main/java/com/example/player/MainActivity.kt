@@ -44,6 +44,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object P {
+    const val SEARCH = "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+    const val HEART = "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+    const val TIMER = "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"
+    const val REPLAY = "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"
+    const val FORWARD = "M4 13c0 4.42 3.58 8 8 8s8-3.58 8-8h-2c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8z"
     const val PLAY = "M8 5v14l11-7z"
     const val PAUSE = "M6 5h4v14H6zM14 5h4v14h-4z"
     const val NEXT = "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"
@@ -109,6 +114,14 @@ class MainActivity : Activity() {
     private val sel = LinkedHashSet<Long>()
     private var selecting = false
     private var pendingDel: List<Long> = emptyList()
+    private val FAV = "♥"
+    private val favs = LinkedHashSet<Long>()
+    private var query = ""
+    private var sortMode = 0
+    private var restored = false
+    private var sleepRun: Runnable? = null
+    private lateinit var speedTv: TextView
+    private lateinit var heartIc: Ic
     private lateinit var prefs: SharedPreferences
     private var player: Player? = null
     private val ui = Handler(Looper.getMainLooper())
@@ -171,6 +184,7 @@ class MainActivity : Activity() {
             })
             col.addView(TextView(ctx).apply { text = t.artist; textSize = 13f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END; setTextColor(grey) })
             row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+            if (favs.contains(t.id)) row.addView(Ic(ctx, P.HEART, c1, 0.7f), LinearLayout.LayoutParams(dp(24), dp(24)).apply { leftMargin = dp(8) })
             if (selecting) {
                 val picked = sel.contains(t.id)
                 val box = FrameLayout(ctx).apply {
@@ -192,6 +206,8 @@ class MainActivity : Activity() {
         prefs = getSharedPreferences("p", MODE_PRIVATE)
         pi = prefs.getInt("acc", 0).coerceIn(0, accents.size - 1)
         amoled = prefs.getBoolean("amoled", false)
+        sortMode = prefs.getInt("sort", 0)
+        try { (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { favs.add(it.toLong()) } } catch (e: Exception) { }
         loadPls()
         build()
         val perms = mutableListOf(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -200,7 +216,7 @@ class MainActivity : Activity() {
         else requestPermissions(perms.toTypedArray(), 1)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val f = MediaController.Builder(this, token).buildAsync()
-        f.addListener({ player = f.get(); player?.addListener(listener); updateNow() }, ContextCompat.getMainExecutor(this))
+        f.addListener({ player = f.get(); player?.addListener(listener); updateNow(); tryRestore() }, ContextCompat.getMainExecutor(this))
         tick()
     }
 
@@ -217,6 +233,8 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (selecting) endSelect() else super.onBackPressed()
     }
+
+    override fun onStop() { saveLast(); super.onStop() }
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
@@ -244,6 +262,10 @@ class MainActivity : Activity() {
         shufIc.tint(if (p.shuffleModeEnabled) c1 else grey)
         repIc.setIcon(if (p.repeatMode == Player.REPEAT_MODE_ONE) P.REPEAT_ONE else P.REPEAT)
         repIc.tint(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else grey)
+        heartIc.tint(if (favs.contains(m?.mediaId?.toLongOrNull() ?: -1L)) c1 else grey)
+        val sp = p.playbackParameters.speed
+        speedTv.text = (if (sp % 1f == 0f) sp.toInt().toString() else sp.toString()) + "×"
+        speedTv.setTextColor(if (sp != 1f) c1 else grey)
         trackAdapter.notifyDataSetChanged()
         loadCover()
     }
@@ -294,7 +316,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) { }
         all = list
         if (list.isEmpty()) Toast.makeText(this, "Музыка не найдена. Проверьте доступ к музыке в настройках приложения.", Toast.LENGTH_LONG).show()
-        refreshTabs(); refreshList()
+        refreshTabs(); refreshList(); tryRestore()
     }
 
     private fun item(t: Track): MediaItem = MediaItem.Builder()
@@ -312,14 +334,26 @@ class MainActivity : Activity() {
 
     private fun refreshList() {
         val cur = tab
-        shown = if (cur == null) all else (pls[cur] ?: mutableListOf<Long>()).mapNotNull { id -> all.find { it.id == id } }
+        var l = when {
+            cur == null -> when (sortMode) {
+                1 -> all.sortedBy { it.artist.lowercase() }
+                2 -> all.sortedByDescending { it.id }
+                else -> all
+            }
+            cur == FAV -> all.filter { favs.contains(it.id) }
+            else -> (pls[cur] ?: mutableListOf<Long>()).mapNotNull { id -> all.find { it.id == id } }
+        }
+        if (query.isNotBlank()) l = l.filter { (it.title + " " + it.artist).contains(query, true) }
+        shown = l
         trackAdapter.notifyDataSetChanged()
     }
 
     private fun refreshTabs() {
         tabsBox.removeAllViews()
         fun add(v: View) { tabsBox.addView(v, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) }) }
+        if (query.isNotBlank()) add(chip("✕ «" + query + "»", true) { query = ""; refreshTabs(); refreshList() })
         add(chip("Все треки", tab == null) { tab = null; refreshTabs(); refreshList() })
+        add(chip("♥ Избранное", tab == FAV) { tab = FAV; refreshTabs(); refreshList() })
         for (n in pls.keys.toList()) {
             val c = chip(n, tab == n) { tab = n; refreshTabs(); refreshList() }
             c.setOnLongClickListener { plMenu(n); true }
@@ -337,6 +371,7 @@ class MainActivity : Activity() {
         if (!selecting) {
             topBar.addView(TextView(this).apply { text = "Плеер"; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white) },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            btn(P.SEARCH) { ask("Поиск", query) { q -> query = q; refreshTabs(); refreshList() } }
             btn(P.MENU) { selecting = true; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged() }
             btn(P.TUNE) { settings() }
         } else {
@@ -377,11 +412,15 @@ class MainActivity : Activity() {
     }
 
     private fun trackMenu(t: Track) {
-        val opts = mutableListOf("Выбрать несколько", "Добавить в плейлист", "Поделиться", "Удалить с устройства")
-        if (tab != null) opts.add(0, "Убрать из плейлиста")
+        val opts = mutableListOf("Играть следующей", "В конец очереди", if (favs.contains(t.id)) "Убрать из избранного" else "В избранное", "Выбрать несколько", "Добавить в плейлист", "Поделиться", "Информация", "Удалить с устройства")
+        if (tab != null && tab != FAV) opts.add(0, "Убрать из плейлиста")
         AlertDialog.Builder(this).setTitle(t.title).setItems(opts.toTypedArray()) { _, w ->
             when (opts[w]) {
                 "Убрать из плейлиста" -> { pls[tab!!]?.remove(t.id); savePls(); refreshList() }
+                "Играть следующей" -> enqueue(t, true)
+                "В конец очереди" -> enqueue(t, false)
+                "В избранное", "Убрать из избранного" -> toggleFav(t.id)
+                "Информация" -> info(t)
                 "Выбрать несколько" -> { selecting = true; sel.clear(); sel.add(t.id); refreshTop(); trackAdapter.notifyDataSetChanged() }
                 "Добавить в плейлист" -> addToPlaylist(listOf(t.id))
                 "Поделиться" -> share(listOf(t.id))
@@ -445,17 +484,81 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        AlertDialog.Builder(this).setTitle("Внешний вид").setItems(arrayOf("Цвет акцента", "Фон")) { _, w ->
-            if (w == 0) {
-                AlertDialog.Builder(this).setItems(accentNames) { _, i ->
-                    pi = i; prefs.edit().putInt("acc", pi).apply(); rebuild()
-                }.show()
-            } else {
-                AlertDialog.Builder(this).setItems(arrayOf("Тёмный (как в Spotify)", "AMOLED (чёрный)")) { _, i ->
-                    amoled = i == 1; prefs.edit().putBoolean("amoled", amoled).apply(); rebuild()
-                }.show()
+        AlertDialog.Builder(this).setTitle("Настройки").setItems(arrayOf("Цвет акцента", "Фон", "Сортировка", "Скорость воспроизведения", "Таймер сна")) { _, w ->
+            when (w) {
+                0 -> AlertDialog.Builder(this).setItems(accentNames) { _, i -> pi = i; prefs.edit().putInt("acc", pi).apply(); rebuild() }.show()
+                1 -> AlertDialog.Builder(this).setItems(arrayOf("Тёмный (как в Spotify)", "AMOLED (чёрный)")) { _, i -> amoled = i == 1; prefs.edit().putBoolean("amoled", amoled).apply(); rebuild() }.show()
+                2 -> AlertDialog.Builder(this).setTitle("Сортировка").setItems(arrayOf("По названию", "По исполнителю", "Сначала новые")) { _, i -> sortMode = i; prefs.edit().putInt("sort", i).apply(); refreshList() }.show()
+                3 -> speedDialog()
+                4 -> sleepDialog()
             }
         }.show()
+    }
+
+    private fun speedDialog() {
+        val v = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+        AlertDialog.Builder(this).setTitle("Скорость").setItems(arrayOf("0.5×", "0.75×", "1× (обычная)", "1.25×", "1.5×", "2×")) { _, i ->
+            player?.setPlaybackSpeed(v[i]); updateNow()
+        }.show()
+    }
+
+    private fun sleepDialog() {
+        val mins = intArrayOf(15, 30, 45, 60, 0)
+        AlertDialog.Builder(this).setTitle("Таймер сна").setItems(arrayOf("15 минут", "30 минут", "45 минут", "1 час", "Выключить таймер")) { _, i ->
+            sleepRun?.let { ui.removeCallbacks(it) }
+            sleepRun = null
+            if (mins[i] > 0) {
+                val r = Runnable { player?.pause(); toast("Таймер сна: музыка остановлена") }
+                sleepRun = r
+                ui.postDelayed(r, mins[i] * 60000L)
+                toast("Музыка остановится через " + mins[i] + " мин")
+            } else toast("Таймер выключен")
+        }.show()
+    }
+
+    private fun tryRestore() {
+        if (restored) return
+        val p = player ?: return
+        if (all.isEmpty()) return
+        restored = true
+        if (p.currentMediaItem != null) return
+        val idx = all.indexOfFirst { it.id == prefs.getLong("last", -1L) }
+        if (idx < 0) return
+        p.setMediaItems(all.map { item(it) }, idx, prefs.getLong("pos", 0L))
+        p.prepare()
+    }
+
+    private fun saveLast() {
+        val p = player ?: return
+        val id = p.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        prefs.edit().putLong("last", id).putLong("pos", p.currentPosition).apply()
+    }
+
+    private fun toggleFav(id: Long) {
+        if (!favs.remove(id)) favs.add(id)
+        prefs.edit().putString("favs", favs.joinToString(",")).apply()
+        updateNow(); refreshList()
+    }
+
+    private fun enqueue(t: Track, next: Boolean) {
+        val p = player ?: return
+        if (p.mediaItemCount == 0) { p.setMediaItem(item(t)); p.prepare(); p.play(); return }
+        if (next) p.addMediaItem(p.currentMediaItemIndex + 1, item(t)) else p.addMediaItem(item(t))
+        toast(if (next) "Сыграет следующей" else "Добавлено в очередь")
+    }
+
+    private fun info(t: Track) {
+        var msg = t.title + "\n" + t.artist
+        try {
+            val c = contentResolver.query(uriOf(t.id), arrayOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.MIME_TYPE, MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.DATA), null, null, null)
+            if (c != null) {
+                if (c.moveToFirst()) {
+                    msg = "Файл: " + c.getString(0) + "\nФормат: " + c.getString(2) + "\nРазмер: " + String.format("%.1f МБ", c.getLong(1) / 1048576.0) + "\nДлительность: " + fmt(c.getLong(3)) + "\nПуть: " + c.getString(4)
+                }
+                c.close()
+            }
+        } catch (e: Exception) { }
+        AlertDialog.Builder(this).setTitle("Информация").setMessage(msg).setPositiveButton("OK", null).show()
     }
 
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
@@ -575,6 +678,14 @@ class MainActivity : Activity() {
         fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(8); rightMargin = dp(8) })
         cell(shufIc, 48); cell(prev, 56); cell(playIc, 66); cell(next, 56); cell(repIc, 48)
         panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        val row2 = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        val back10 = Ic(this, P.REPLAY, grey, 0.6f).apply { setOnClickListener { player?.let { it.seekTo(maxOf(0L, it.currentPosition - 10000L)) } } }
+        heartIc = Ic(this, P.HEART, grey, 0.6f).apply { setOnClickListener { player?.currentMediaItem?.mediaId?.toLongOrNull()?.let { toggleFav(it) } } }
+        speedTv = TextView(this).apply { text = "1×"; textSize = 15f; typeface = Typeface.DEFAULT_BOLD; setTextColor(grey); gravity = Gravity.CENTER; setOnClickListener { speedDialog() } }
+        val timer = Ic(this, P.TIMER, grey, 0.6f).apply { setOnClickListener { sleepDialog() } }
+        val fwd10 = Ic(this, P.FORWARD, grey, 0.6f).apply { setOnClickListener { player?.let { it.seekTo(it.currentPosition + 10000L) } } }
+        for (v in listOf<View>(back10, heartIc, speedTv, timer, fwd10)) row2.addView(v, LinearLayout.LayoutParams(dp(52), dp(44)))
+        panel.addView(row2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         root.addView(panel, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         refreshTop()
