@@ -82,6 +82,8 @@ class Ic(ctx: Context, d: String, private var color: Int, private val k: Float =
     }
 }
 
+object Audio { @Volatile var session = 0 }
+
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     override fun onCreate() {
@@ -91,6 +93,8 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        Audio.session = p.audioSessionId
+        p.addListener(object : Player.Listener { override fun onAudioSessionIdChanged(audioSessionId: Int) { Audio.session = audioSessionId } })
         session = MediaSession.Builder(this, p).build()
     }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -102,7 +106,7 @@ class PlaybackService : MediaSessionService() {
 }
 
 class MainActivity : Activity() {
-    data class Track(val id: Long, val title: String, val artist: String)
+    data class Track(val id: Long, val title: String, val artist: String, val album: String = "", val folder: String = "")
 
     private val accents = arrayOf("#1DB954", "#FF2E93", "#00E5FF", "#FF6A00", "#A855F7")
     private val accentNames = arrayOf("Зелёный", "Розовый", "Голубой", "Оранжевый", "Фиолетовый")
@@ -118,6 +122,16 @@ class MainActivity : Activity() {
     private val favs = LinkedHashSet<Long>()
     private var query = ""
     private var sortMode = 0
+    private val REC = "REC"
+    private val TOP = "TOP"
+    private val HIST = "HIST"
+    private var fKind = ""
+    private var fVal = ""
+    private val plays = HashMap<Long, Int>()
+    private val hist = ArrayList<Long>()
+    private var eq: android.media.audiofx.Equalizer? = null
+    private var bass: android.media.audiofx.BassBoost? = null
+    private var rootV: View? = null
     private var restored = false
     private var sleepRun: Runnable? = null
     private lateinit var speedTv: TextView
@@ -161,6 +175,9 @@ class MainActivity : Activity() {
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updateNow() }
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (player?.playWhenReady == true) mediaItem?.mediaId?.toLongOrNull()?.let { countPlay(it) }
+        }
     }
 
     private val trackAdapter = object : BaseAdapter() {
@@ -208,6 +225,8 @@ class MainActivity : Activity() {
         amoled = prefs.getBoolean("amoled", false)
         sortMode = prefs.getInt("sort", 0)
         try { (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { favs.add(it.toLong()) } } catch (e: Exception) { }
+        try { val o = JSONObject(prefs.getString("plays", "{}") ?: "{}"); for (k in o.keys()) plays[k.toLong()] = o.getInt(k) } catch (e: Exception) { }
+        try { (prefs.getString("hist", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { hist.add(it.toLong()) } } catch (e: Exception) { }
         loadPls()
         build()
         val perms = mutableListOf(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -238,6 +257,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
+        eq?.release(); bass?.release()
         (player as? MediaController)?.release()
         super.onDestroy()
     }
@@ -276,11 +296,12 @@ class MainActivity : Activity() {
         coverId = id
         coverImg.setImageDrawable(null)
         coverNote.visibility = View.VISIBLE
+        tintTop(null)
         if (id < 0 || Build.VERSION.SDK_INT < 29) return
         Thread {
             try {
                 val bmp = contentResolver.loadThumbnail(uriOf(id), Size(600, 600), null)
-                runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverNote.visibility = View.GONE } }
+                runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverNote.visibility = View.GONE; tintTop(android.graphics.Bitmap.createScaledBitmap(bmp, 1, 1, true).getPixel(0, 0)) } }
             } catch (e: Exception) { }
         }.start()
     }
@@ -304,13 +325,13 @@ class MainActivity : Activity() {
 
     private fun loadTracks() {
         val list = ArrayList<Track>()
-        val col = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST)
+        val col = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.ALBUM, MediaStore.Audio.Media.DATA)
         val sel = "(" + MediaStore.Audio.Media.IS_MUSIC + " != 0 OR " + MediaStore.Audio.Media.MIME_TYPE + " = 'audio/mpeg') AND " + MediaStore.Audio.Media.DURATION + " > 30000"
         try {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, col, sel, null, MediaStore.Audio.Media.TITLE + " COLLATE NOCASE")?.use { c ->
                 while (c.moveToNext()) {
                     val art = c.getString(2) ?: ""
-                    list.add(Track(c.getLong(0), c.getString(1) ?: "Без названия", if (art == "<unknown>") "" else art))
+                    list.add(Track(c.getLong(0), c.getString(1) ?: "Без названия", if (art == "<unknown>") "" else art, c.getString(3) ?: "", (c.getString(4) ?: "").substringBeforeLast('/', "").substringAfterLast('/')))
                 }
             }
         } catch (e: Exception) { }
@@ -341,9 +362,13 @@ class MainActivity : Activity() {
                 else -> all
             }
             cur == FAV -> all.filter { favs.contains(it.id) }
+            cur == REC -> all.sortedByDescending { it.id }.take(50)
+            cur == TOP -> all.filter { (plays[it.id] ?: 0) > 0 }.sortedByDescending { plays[it.id] ?: 0 }.take(50)
+            cur == HIST -> hist.mapNotNull { id -> all.find { it.id == id } }
             else -> (pls[cur] ?: mutableListOf<Long>()).mapNotNull { id -> all.find { it.id == id } }
         }
         if (query.isNotBlank()) l = l.filter { (it.title + " " + it.artist).contains(query, true) }
+        if (fKind.isNotEmpty()) l = l.filter { when (fKind) { "artist" -> it.artist == fVal; "album" -> it.album == fVal; else -> it.folder == fVal } }
         shown = l
         trackAdapter.notifyDataSetChanged()
     }
@@ -354,6 +379,9 @@ class MainActivity : Activity() {
         if (query.isNotBlank()) add(chip("✕ «" + query + "»", true) { query = ""; refreshTabs(); refreshList() })
         add(chip("Все треки", tab == null) { tab = null; refreshTabs(); refreshList() })
         add(chip("♥ Избранное", tab == FAV) { tab = FAV; refreshTabs(); refreshList() })
+        add(chip("Обзор ▾", false) { browse() })
+        if (fKind.isNotEmpty()) add(chip("✕ " + fVal, true) { fKind = ""; fVal = ""; refreshTabs(); refreshList() })
+        if (tab == REC || tab == TOP || tab == HIST) add(chip("✕ " + autoName(tab!!), true) { tab = null; refreshTabs(); refreshList() })
         for (n in pls.keys.toList()) {
             val c = chip(n, tab == n) { tab = n; refreshTabs(); refreshList() }
             c.setOnLongClickListener { plMenu(n); true }
@@ -484,13 +512,16 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        AlertDialog.Builder(this).setTitle("Настройки").setItems(arrayOf("Цвет акцента", "Фон", "Сортировка", "Скорость воспроизведения", "Таймер сна")) { _, w ->
+        AlertDialog.Builder(this).setTitle("Настройки").setItems(arrayOf("Цвет акцента", "Фон", "Сортировка", "Скорость воспроизведения", "Таймер сна", "Эквалайзер и бас", "Экспорт плейлистов", "Импорт плейлистов")) { _, w ->
             when (w) {
                 0 -> AlertDialog.Builder(this).setItems(accentNames) { _, i -> pi = i; prefs.edit().putInt("acc", pi).apply(); rebuild() }.show()
                 1 -> AlertDialog.Builder(this).setItems(arrayOf("Тёмный (как в Spotify)", "AMOLED (чёрный)")) { _, i -> amoled = i == 1; prefs.edit().putBoolean("amoled", amoled).apply(); rebuild() }.show()
                 2 -> AlertDialog.Builder(this).setTitle("Сортировка").setItems(arrayOf("По названию", "По исполнителю", "Сначала новые")) { _, i -> sortMode = i; prefs.edit().putInt("sort", i).apply(); refreshList() }.show()
                 3 -> speedDialog()
                 4 -> sleepDialog()
+                5 -> eqDialog()
+                6 -> exportPls()
+                7 -> importPls()
             }
         }.show()
     }
@@ -561,6 +592,121 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Информация").setMessage(msg).setPositiveButton("OK", null).show()
     }
 
+    private fun tintTop(px: Int?) {
+        val t = if (px == null) mix(c1, if (amoled) 0.18f else 0.40f) else mix(px, if (amoled) 0.30f else 0.55f)
+        rootV?.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(t, base, base))
+        window.statusBarColor = t
+    }
+
+    private fun countPlay(id: Long) {
+        plays[id] = (plays[id] ?: 0) + 1
+        hist.remove(id)
+        hist.add(0, id)
+        while (hist.size > 50) hist.removeAt(hist.size - 1)
+        val o = JSONObject()
+        for ((k, v) in plays) o.put(k.toString(), v)
+        prefs.edit().putString("plays", o.toString()).putString("hist", hist.joinToString(",")).apply()
+    }
+
+    private fun autoName(k: String) = when (k) { REC -> "Недавно добавленные"; TOP -> "Часто слушаемые"; else -> "История" }
+
+    private fun pickGroup(kind: String, values: List<String>) {
+        val g = values.filter { it.isNotEmpty() }.groupingBy { it }.eachCount().toList().sortedBy { it.first.lowercase() }
+        if (g.isEmpty()) { toast("Пусто"); return }
+        AlertDialog.Builder(this).setTitle("Выберите").setItems(g.map { it.first + " (" + it.second + ")" }.toTypedArray()) { _, i ->
+            fKind = kind; fVal = g[i].first; tab = null; refreshTabs(); refreshList()
+        }.show()
+    }
+
+    private fun browse() {
+        AlertDialog.Builder(this).setTitle("Обзор").setItems(arrayOf("Исполнители", "Альбомы", "Папки", "Недавно добавленные", "Часто слушаемые", "История", "Статистика")) { _, w ->
+            when (w) {
+                0 -> pickGroup("artist", all.map { it.artist })
+                1 -> pickGroup("album", all.map { it.album })
+                2 -> pickGroup("folder", all.map { it.folder })
+                3 -> { tab = REC; refreshTabs(); refreshList() }
+                4 -> { tab = TOP; refreshTabs(); refreshList() }
+                5 -> { tab = HIST; refreshTabs(); refreshList() }
+                6 -> stats()
+            }
+        }.show()
+    }
+
+    private fun stats() {
+        val top = plays.entries.sortedByDescending { it.value }.take(10).mapNotNull { e -> all.find { it.id == e.key }?.let { it.title + " — " + e.value } }
+        val msg = "Всего прослушиваний: " + plays.values.sum() + "\n\n" + (if (top.isEmpty()) "Пока пусто" else top.joinToString("\n"))
+        AlertDialog.Builder(this).setTitle("Статистика").setMessage(msg).setPositiveButton("OK", null).show()
+    }
+
+    private fun eqDialog() {
+        val sid = Audio.session
+        if (sid == 0) { toast("Сначала включите любой трек"); return }
+        try {
+            if (eq == null) {
+                val q = android.media.audiofx.Equalizer(0, sid)
+                q.enabled = true
+                for (b in 0 until q.numberOfBands.toInt()) { val v = prefs.getInt("eq" + b, Int.MIN_VALUE); if (v != Int.MIN_VALUE) q.setBandLevel(b.toShort(), v.toShort()) }
+                eq = q
+            }
+            if (bass == null) {
+                val x = android.media.audiofx.BassBoost(0, sid)
+                x.enabled = true
+                x.setStrength(prefs.getInt("bass", 0).toShort())
+                bass = x
+            }
+        } catch (e: Exception) { toast("Эквалайзер недоступен на этом устройстве"); return }
+        val q = eq!!
+        val lay = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)) }
+        val lo = q.bandLevelRange[0].toInt()
+        val hi = q.bandLevelRange[1].toInt()
+        for (b in 0 until q.numberOfBands.toInt()) {
+            val band = b.toShort()
+            lay.addView(TextView(this).apply { text = (q.getCenterFreq(band) / 1000).toString() + " Гц"; setTextColor(grey) })
+            lay.addView(SeekBar(this).apply {
+                max = hi - lo
+                progress = q.getBandLevel(band) - lo
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) { if (u) { q.setBandLevel(band, (p + lo).toShort()); prefs.edit().putInt("eq" + b, p + lo).apply() } }
+                    override fun onStartTrackingTouch(s: SeekBar) {}
+                    override fun onStopTrackingTouch(s: SeekBar) {}
+                })
+            })
+        }
+        lay.addView(TextView(this).apply { text = "Бас"; setTextColor(grey) })
+        lay.addView(SeekBar(this).apply {
+            max = 1000
+            progress = prefs.getInt("bass", 0)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) { if (u) { bass?.setStrength(p.toShort()); prefs.edit().putInt("bass", p).apply() } }
+                override fun onStartTrackingTouch(s: SeekBar) {}
+                override fun onStopTrackingTouch(s: SeekBar) {}
+            })
+        })
+        AlertDialog.Builder(this).setTitle("Эквалайзер").setView(ScrollView(this).apply { addView(lay) }).setPositiveButton("Готово", null).show()
+    }
+
+    private fun exportPls() {
+        val o = JSONObject()
+        for ((k, v) in pls) o.put(k, JSONArray(v.mapNotNull { id -> all.find { it.id == id }?.let { it.artist + "|" + it.title } }))
+        val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, o.toString())
+        startActivity(Intent.createChooser(i, "Экспорт плейлистов"))
+    }
+
+    private fun importPls() {
+        ask("Вставьте текст экспорта", "") { txt ->
+            try {
+                val o = JSONObject(txt)
+                for (k in o.keys()) {
+                    val a = o.getJSONArray(k)
+                    val ids = ArrayList<Long>()
+                    for (j in 0 until a.length()) { val key = a.getString(j); all.find { it.artist + "|" + it.title == key }?.let { ids.add(it.id) } }
+                    pls[k] = ids
+                }
+                savePls(); refreshTabs(); toast("Плейлисты импортированы")
+            } catch (e: Exception) { toast("Неверный текст") }
+        }
+    }
+
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
@@ -586,6 +732,7 @@ class MainActivity : Activity() {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, base, base))
         }
         topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(8), dp(8), dp(4)) }
+        rootV = root
         root.addView(topBar, LinearLayout.LayoutParams(-1, -2))
 
         val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(6), dp(24), dp(14)) }
