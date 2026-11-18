@@ -10,7 +10,11 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.LinearGradient
+import android.graphics.Shader
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.util.Size
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -57,6 +61,12 @@ class PlaybackService : MediaSessionService() {
 class MainActivity : Activity() {
     data class Track(val id: Long, val title: String, val artist: String)
 
+    private val presets = arrayOf(
+        arrayOf("#FF2E93", "#7C3AED"), arrayOf("#00E5FF", "#3B82F6"), arrayOf("#B6FF00", "#00C853"),
+        arrayOf("#FF6A00", "#FF1744"), arrayOf("#A855F7", "#FF2E93")
+    )
+    private val presetNames = arrayOf("Розово-фиолетовый", "Циан-синий", "Лайм-зелёный", "Оранжево-красный", "Фиолетово-розовый")
+
     private var all = listOf<Track>()
     private var shown = listOf<Track>()
     private var tab: String? = null
@@ -64,36 +74,81 @@ class MainActivity : Activity() {
     private lateinit var prefs: SharedPreferences
     private var player: Player? = null
     private val ui = Handler(Looper.getMainLooper())
-    private var accent = Color.parseColor("#FF5A36")
-    private var theme = "dark"
-    private var bg = 0
-    private var fg = 0
-    private var surf = 0
-    private var mut = 0
+    private var pi = 0
+    private var amoled = false
+    private var c1 = 0
+    private var c2 = 0
+    private var onAcc = Color.WHITE
     private var dragging = false
+    private var coverId = -2L
 
     private lateinit var tabsBox: LinearLayout
     private lateinit var listView: ListView
     private lateinit var nowTitle: TextView
     private lateinit var nowArtist: TextView
     private lateinit var seek: SeekBar
-    private lateinit var timeTv: TextView
+    private lateinit var curTv: TextView
+    private lateinit var durTv: TextView
     private lateinit var playBtn: TextView
     private lateinit var shufBtn: TextView
     private lateinit var repBtn: TextView
+    private lateinit var coverImg: ImageView
+    private lateinit var coverNote: TextView
+
+    private val soft = Color.parseColor("#D8CCF2")
+    private val white = Color.parseColor("#F7F2FF")
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun fmt(ms: Long): String { val s = ms / 1000; return String.format("%d:%02d", s / 60, s % 60) }
+    private fun grad(a: Int, b: Int, r: Int, o: GradientDrawable.Orientation = GradientDrawable.Orientation.TL_BR) =
+        GradientDrawable(o, intArrayOf(a, b)).apply { cornerRadius = dp(r).toFloat() }
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updateNow() }
     }
 
+    private val trackAdapter = object : BaseAdapter() {
+        override fun getCount() = shown.size
+        override fun getItem(i: Int): Any = shown[i]
+        override fun getItemId(i: Int) = shown[i].id
+        override fun getView(i: Int, v: View?, p: ViewGroup?): View {
+            val t = shown[i]
+            val on = player?.currentMediaItem?.mediaId == t.id.toString()
+            val outer = FrameLayout(this@MainActivity).apply { setPadding(dp(16), 0, dp(16), 0) }
+            val row = LinearLayout(this@MainActivity).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(14), dp(10))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(18).toFloat()
+                    if (on) { setColor(Color.argb(46, Color.red(c1), Color.green(c1), Color.blue(c1))); setStroke(dp(1), c1) }
+                    else setColor(Color.argb(22, 255, 255, 255))
+                }
+            }
+            val badge = TextView(this@MainActivity).apply {
+                text = if (on && player?.isPlaying == true) "▶" else "♪"
+                textSize = 18f; gravity = Gravity.CENTER
+                setTextColor(if (on) onAcc else soft)
+                background = if (on) grad(c1, c2, 14) else grad(Color.argb(40, 255, 255, 255), Color.argb(20, 255, 255, 255), 14)
+            }
+            row.addView(badge, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val col = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(TextView(this@MainActivity).apply {
+                text = t.title; textSize = 16f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END
+                setTextColor(if (on) c1 else white)
+                typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            })
+            col.addView(TextView(this@MainActivity).apply { text = t.artist; textSize = 13f; setSingleLine(); setTextColor(soft) })
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
+            outer.addView(row)
+            return outer
+        }
+    }
+
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("p", MODE_PRIVATE)
-        accent = prefs.getInt("accent", accent)
-        theme = prefs.getString("theme", "dark") ?: "dark"
+        pi = prefs.getInt("preset", 0).coerceIn(0, presets.size - 1)
+        amoled = prefs.getBoolean("amoled", false)
         loadPls()
         build()
         val perms = mutableListOf(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -122,7 +177,8 @@ class MainActivity : Activity() {
         if (p != null && !dragging && p.duration > 0) {
             seek.max = (p.duration / 1000).toInt()
             seek.progress = (p.currentPosition / 1000).toInt()
-            timeTv.text = fmt(p.currentPosition) + " / " + fmt(p.duration)
+            curTv.text = fmt(p.currentPosition)
+            durTv.text = fmt(p.duration)
         }
         ui.postDelayed({ tick() }, 500)
     }
@@ -133,10 +189,27 @@ class MainActivity : Activity() {
         nowTitle.text = m?.mediaMetadata?.title ?: "Выберите трек"
         nowArtist.text = m?.mediaMetadata?.artist ?: ""
         playBtn.text = if (p.isPlaying) "❚❚" else "▶"
-        shufBtn.setTextColor(if (p.shuffleModeEnabled) accent else mut)
-        repBtn.setTextColor(if (p.repeatMode != Player.REPEAT_MODE_OFF) accent else mut)
+        shufBtn.setTextColor(if (p.shuffleModeEnabled) c1 else soft)
+        repBtn.setTextColor(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else soft)
         repBtn.text = if (p.repeatMode == Player.REPEAT_MODE_ONE) "🔂" else "🔁"
-        (listView.adapter as? BaseAdapter)?.notifyDataSetChanged()
+        trackAdapter.notifyDataSetChanged()
+        loadCover()
+    }
+
+    private fun loadCover() {
+        val id = player?.currentMediaItem?.mediaId?.toLongOrNull() ?: -1L
+        if (id == coverId) return
+        coverId = id
+        coverImg.setImageDrawable(null)
+        coverNote.visibility = View.VISIBLE
+        if (id < 0 || Build.VERSION.SDK_INT < 29) return
+        Thread {
+            try {
+                val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                val bmp = contentResolver.loadThumbnail(uri, Size(600, 600), null)
+                runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverNote.visibility = View.GONE } }
+            } catch (e: Exception) { }
+        }.start()
     }
 
     private fun loadPls() {
@@ -190,28 +263,12 @@ class MainActivity : Activity() {
     private fun refreshList() {
         val cur = tab
         shown = if (cur == null) all else (pls[cur] ?: mutableListOf<Long>()).mapNotNull { id -> all.find { it.id == id } }
-        listView.adapter = object : BaseAdapter() {
-            override fun getCount() = shown.size
-            override fun getItem(i: Int): Any = shown[i]
-            override fun getItemId(i: Int) = shown[i].id
-            override fun getView(i: Int, v: View?, p: ViewGroup?): View {
-                val t = shown[i]
-                val on = player?.currentMediaItem?.mediaId == t.id.toString()
-                val row = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(10)) }
-                row.addView(TextView(this@MainActivity).apply {
-                    text = t.title; textSize = 16f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END
-                    setTextColor(if (on) accent else fg)
-                    typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-                })
-                row.addView(TextView(this@MainActivity).apply { text = t.artist; textSize = 13f; setSingleLine(); setTextColor(mut) })
-                return row
-            }
-        }
+        trackAdapter.notifyDataSetChanged()
     }
 
     private fun refreshTabs() {
         tabsBox.removeAllViews()
-        fun add(v: View) { tabsBox.addView(v, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) }) }
+        fun add(v: View) { tabsBox.addView(v, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) }) }
         add(chip("Все треки", tab == null) { tab = null; refreshTabs(); refreshList() })
         for (n in pls.keys.toList()) {
             val c = chip(n, tab == n) { tab = n; refreshTabs(); refreshList() }
@@ -266,83 +323,140 @@ class MainActivity : Activity() {
     }
 
     private fun settings() {
-        AlertDialog.Builder(this).setTitle("Внешний вид").setItems(arrayOf("Цвет акцента", "Тема")) { _, w ->
+        AlertDialog.Builder(this).setTitle("Внешний вид").setItems(arrayOf("Цветовая схема", "Фон")) { _, w ->
             if (w == 0) {
-                val names = arrayOf("Оранжевый", "Жёлтый", "Зелёный", "Голубой", "Фиолетовый", "Розовый")
-                val cols = arrayOf("#FF5A36", "#FFB400", "#2EC27E", "#19B5D6", "#6C63FF", "#E53EA0")
-                AlertDialog.Builder(this).setItems(names) { _, i ->
-                    accent = Color.parseColor(cols[i]); prefs.edit().putInt("accent", accent).apply(); rebuild()
+                AlertDialog.Builder(this).setItems(presetNames) { _, i ->
+                    pi = i; prefs.edit().putInt("preset", pi).apply(); rebuild()
                 }.show()
             } else {
-                val ids = arrayOf("dark", "amoled", "light")
-                AlertDialog.Builder(this).setItems(arrayOf("Тёмная", "AMOLED", "Светлая")) { _, i ->
-                    theme = ids[i]; prefs.edit().putString("theme", theme).apply(); rebuild()
+                AlertDialog.Builder(this).setItems(arrayOf("Неон (фиолетовая ночь)", "AMOLED (чёрный)")) { _, i ->
+                    amoled = i == 1; prefs.edit().putBoolean("amoled", amoled).apply(); rebuild()
                 }.show()
             }
         }.show()
     }
 
-    private fun rebuild() { build(); refreshTabs(); refreshList(); updateNow() }
+    private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
-        text = t; textSize = 14f
-        setTextColor(if (on) Color.WHITE else fg)
-        setPadding(dp(14), dp(9), dp(14), dp(9))
-        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(if (on) accent else surf) }
+        text = t; textSize = 14f; typeface = Typeface.DEFAULT_BOLD
+        setTextColor(if (on) onAcc else soft)
+        setPadding(dp(16), dp(9), dp(16), dp(9))
+        background = if (on) grad(c1, c2, 22, GradientDrawable.Orientation.LEFT_RIGHT)
+        else GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(Color.argb(28, 255, 255, 255)); setStroke(dp(1), Color.argb(50, 255, 255, 255)) }
         setOnClickListener { f() }
     }
 
     private fun ic(t: String, f: () -> Unit) = TextView(this).apply {
-        text = t; textSize = 24f; gravity = Gravity.CENTER; setTextColor(fg)
+        text = t; textSize = 24f; gravity = Gravity.CENTER; setTextColor(soft)
         setOnClickListener { f() }
     }
 
-    private fun build() {
-        val light = theme == "light"
-        bg = Color.parseColor(if (light) "#F2EFEA" else if (theme == "amoled") "#000000" else "#16151A")
-        fg = Color.parseColor(if (light) "#1D1B19" else "#F1EEE9")
-        surf = Color.parseColor(if (light) "#FFFFFF" else if (theme == "amoled") "#141416" else "#22212A")
-        mut = Color.parseColor(if (light) "#79736C" else "#9B96A2")
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
-        window.decorView.systemUiVisibility = if (light) View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR else 0
+    private fun glow(v: View, color: Int, elev: Int) {
+        v.elevation = dp(elev).toFloat()
+        if (Build.VERSION.SDK_INT >= 28) { v.outlineAmbientShadowColor = color; v.outlineSpotShadowColor = color }
+    }
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(dp(16), dp(10), dp(16), dp(8)) }
+    private fun build() {
+        c1 = Color.parseColor(presets[pi][0])
+        c2 = Color.parseColor(presets[pi][1])
+        onAcc = if (pi == 2) Color.BLACK else Color.WHITE
+        val base = if (amoled) Color.BLACK else Color.parseColor("#07030F")
+        fun mix(c: Int, f: Float) = Color.rgb(
+            (Color.red(c) * f + Color.red(base) * (1 - f)).toInt(),
+            (Color.green(c) * f + Color.green(base) * (1 - f)).toInt(),
+            (Color.blue(c) * f + Color.blue(base) * (1 - f)).toInt())
+        val top = mix(c1, if (amoled) 0.12f else 0.34f)
+        val panelCol = mix(c1, if (amoled) 0.06f else 0.14f)
+        window.statusBarColor = top
+        window.navigationBarColor = panelCol
+        window.decorView.systemUiVisibility = 0
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, mix(c2, 0.10f), base))
+        }
+
+        val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(14), dp(20), dp(16)) }
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(TextView(this).apply { text = "Плеер"; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(fg) }, LinearLayout.LayoutParams(0, -2, 1f))
-        head.addView(chip("Внешний вид", false) { settings() })
-        root.addView(head)
+        head.addView(TextView(this).apply {
+            text = "ПЛЕЕР"; textSize = 28f; typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.12f
+            paint.shader = LinearGradient(0f, 0f, dp(150).toFloat(), 0f, c1, c2, Shader.TileMode.CLAMP)
+            setShadowLayer(dp(10).toFloat(), 0f, 0f, c1)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(chip("Стиль", false) { settings() })
+        header.addView(head)
 
         val hs = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         tabsBox = LinearLayout(this)
         hs.addView(tabsBox)
-        root.addView(hs, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10); bottomMargin = dp(6) })
+        header.addView(hs, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
 
-        nowTitle = TextView(this).apply { text = "Выберите трек"; textSize = 20f; typeface = Typeface.DEFAULT_BOLD; setTextColor(fg); setSingleLine(); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER }
-        nowArtist = TextView(this).apply { textSize = 14f; setTextColor(mut); setSingleLine(); gravity = Gravity.CENTER }
-        root.addView(nowTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        root.addView(nowArtist, LinearLayout.LayoutParams(-1, -2))
+        val side = minOf(resources.displayMetrics.widthPixels - dp(100), dp(300))
+        val box = FrameLayout(this).apply {
+            background = grad(c1, c2, 30)
+            clipToOutline = true
+        }
+        glow(box, c1, 22)
+        coverImg = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        coverNote = TextView(this).apply { text = "♪"; textSize = 90f; gravity = Gravity.CENTER; setTextColor(Color.argb(210, 255, 255, 255)) }
+        box.addView(coverImg, FrameLayout.LayoutParams(-1, -1))
+        box.addView(coverNote, FrameLayout.LayoutParams(-1, -1))
+        header.addView(box, LinearLayout.LayoutParams(side, side).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(26) })
 
+        nowTitle = TextView(this).apply { text = "Выберите трек"; textSize = 22f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER }
+        nowArtist = TextView(this).apply { textSize = 15f; setTextColor(soft); setSingleLine(); gravity = Gravity.CENTER }
+        header.addView(nowTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
+        header.addView(nowArtist, LinearLayout.LayoutParams(-1, -2))
+
+        listView = ListView(this).apply {
+            divider = ColorDrawable(Color.TRANSPARENT)
+            dividerHeight = dp(8)
+            selector = ColorDrawable(Color.TRANSPARENT)
+            setCacheColorHint(Color.TRANSPARENT)
+            isVerticalScrollBarEnabled = false
+            addHeaderView(header, null, false)
+            setAdapter(trackAdapter)
+            setOnItemClickListener { _, _, pos, _ -> val i = pos - headerViewsCount; if (i >= 0 && i < shown.size) playFrom(i) }
+            setOnItemLongClickListener { _, _, pos, _ -> val i = pos - headerViewsCount; if (i >= 0 && i < shown.size) trackMenu(shown[i]); true }
+        }
+        root.addView(listView, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val r = dp(28).toFloat()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(12))
+            background = GradientDrawable().apply { setColor(panelCol); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f) }
+        }
+        glow(panel, c1, 16)
         seek = SeekBar(this).apply {
-            progressTintList = ColorStateList.valueOf(accent)
-            thumbTintList = ColorStateList.valueOf(accent)
+            progressTintList = ColorStateList.valueOf(c1)
+            thumbTintList = ColorStateList.valueOf(c2)
+            progressBackgroundTintList = ColorStateList.valueOf(Color.argb(70, 255, 255, 255))
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) {}
                 override fun onStartTrackingTouch(s: SeekBar) { dragging = true }
                 override fun onStopTrackingTouch(s: SeekBar) { dragging = false; player?.seekTo(s.progress * 1000L) }
             })
         }
-        timeTv = TextView(this).apply { textSize = 12f; setTextColor(mut); gravity = Gravity.CENTER }
-        root.addView(seek, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        root.addView(timeTv, LinearLayout.LayoutParams(-1, -2))
+        curTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(soft) }
+        durTv = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(soft) }
+        val seekRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        seekRow.addView(curTv)
+        seekRow.addView(seek, LinearLayout.LayoutParams(0, -2, 1f))
+        seekRow.addView(durTv)
+        panel.addView(seekRow)
 
         shufBtn = ic("🔀") { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
         val prev = ic("⏮") { player?.seekToPrevious() }
+        prev.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(30, 255, 255, 255)) }
         playBtn = ic("▶") { player?.let { if (it.isPlaying) it.pause() else it.play() } }
-        playBtn.setTextColor(Color.WHITE)
-        playBtn.textSize = 26f
-        playBtn.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(accent) }
+        playBtn.setTextColor(onAcc)
+        playBtn.textSize = 28f
+        playBtn.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(c1, c2)).apply { shape = GradientDrawable.OVAL }
+        glow(playBtn, c1, 14)
         val next = ic("⏭") { player?.seekToNext() }
+        next.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(30, 255, 255, 255)) }
         repBtn = ic("🔁") {
             player?.let {
                 it.repeatMode = when (it.repeatMode) {
@@ -352,18 +466,11 @@ class MainActivity : Activity() {
                 }
             }
         }
-        shufBtn.setTextColor(mut); repBtn.setTextColor(mut)
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(4); rightMargin = dp(4) })
-        cell(shufBtn, 48); cell(prev, 52); cell(playBtn, 68); cell(next, 52); cell(repBtn, 48)
-        root.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-
-        listView = ListView(this).apply {
-            divider = null
-            setOnItemClickListener { _, _, i, _ -> playFrom(i) }
-            setOnItemLongClickListener { _, _, i, _ -> trackMenu(shown[i]); true }
-        }
-        root.addView(listView, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(10) })
+        fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(6); rightMargin = dp(6) })
+        cell(shufBtn, 46); cell(prev, 54); cell(playBtn, 74); cell(next, 54); cell(repBtn, 46)
+        panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        root.addView(panel, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
     }
 }
