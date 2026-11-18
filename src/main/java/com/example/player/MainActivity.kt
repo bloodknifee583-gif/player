@@ -13,6 +13,8 @@ import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -25,6 +27,7 @@ import android.provider.MediaStore
 import android.text.TextUtils
 import android.util.Size
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -44,6 +47,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object P {
+    const val DOWN = "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"
+    const val COPY = "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+    const val DRAG = "M20 9H4v2h16V9zM4 15h16v-2H4v2z"
     const val STAR = "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
     const val GLOBE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"
     const val BACK = "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"
@@ -104,7 +110,30 @@ class Ic(ctx: Context, d: String, private var color: Int, private val k: Float =
     }
 }
 
-object Audio { @Volatile var session = 0 }
+class Aura(ctx: Context) : View(ctx) {
+    var color = Color.GREEN
+    var baseColor = Color.BLACK
+    var active = false
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var t = 0f
+    override fun onDraw(c: Canvas) {
+        c.drawColor(baseColor)
+        t += if (active) 0.014f else 0.003f
+        val w = width.toFloat()
+        val h = height.toFloat()
+        for (i in 0 until 3) {
+            val a = t + i * 2.1f
+            val cx = w * (0.5f + 0.38f * kotlin.math.sin(a * (1f + i * 0.3f)))
+            val cy = h * (0.30f + i * 0.22f + 0.15f * kotlin.math.cos(a * (0.8f + i * 0.25f)))
+            val r = w * (0.60f + 0.14f * kotlin.math.sin(a * 2f))
+            p.shader = RadialGradient(cx, cy, r, Color.argb(if (i == 0) 120 else 80, Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+            c.drawCircle(cx, cy, r, p)
+        }
+        postInvalidateOnAnimation()
+    }
+}
+
+object Audio { @Volatile var session = 0; var exo: ExoPlayer? = null }
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -116,11 +145,14 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
         Audio.session = p.audioSessionId
+        Audio.exo = p
+        p.setSkipSilenceEnabled(getSharedPreferences("p", MODE_PRIVATE).getBoolean("skip", false))
         p.addListener(object : Player.Listener { override fun onAudioSessionIdChanged(audioSessionId: Int) { Audio.session = audioSessionId } })
         session = MediaSession.Builder(this, p).build()
     }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
     override fun onDestroy() {
+        Audio.exo = null
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()
@@ -161,6 +193,16 @@ class MainActivity : Activity() {
     private var eq: android.media.audiofx.Equalizer? = null
     private var bass: android.media.audiofx.BassBoost? = null
     private var rootV: View? = null
+    private var fadeSec = 0
+    private var skipSil = false
+    private val daily = HashMap<String, Long>()
+    private var saveCnt = 0
+    private var dlReceiver: android.content.BroadcastReceiver? = null
+    private var npRefresh: (() -> Unit)? = null
+    private var npDrag = false
+    private var coverBmp: android.graphics.Bitmap? = null
+    private var dragIdx = -1
+    private val dupAll = HashSet<Long>()
     private var panelV: View? = null
     private val webs = HashMap<String, android.webkit.WebView>()
     private var webKind = "yt"
@@ -231,6 +273,7 @@ class MainActivity : Activity() {
             val on = player?.currentMediaItem?.mediaId == t.id.toString()
             val ctx = this@MainActivity
             val outer = FrameLayout(ctx).apply { setPadding(dp(20), dp(6), dp(18), dp(6)) }
+            outer.alpha = if (i == dragIdx) 0.5f else 1f
             val row = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
             val badge = FrameLayout(ctx).apply { background = rr(card, 6) }
             badge.addView(Ic(ctx, if (on && player?.isPlaying == true) P.PLAY else P.NOTE, if (on) c1 else grey, 0.5f), FrameLayout.LayoutParams(-1, -1))
@@ -244,6 +287,8 @@ class MainActivity : Activity() {
             col.addView(TextView(ctx).apply { text = t.artist; textSize = 13f; setSingleLine(); ellipsize = TextUtils.TruncateAt.END; setTextColor(grey) })
             row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
             if (favs.contains(t.id)) row.addView(Ic(ctx, P.HEART, c1, 0.7f), LinearLayout.LayoutParams(dp(24), dp(24)).apply { leftMargin = dp(8) })
+            val curTab = tab
+            if (!selecting && curTab != null && curTab != FAV && curTab != REC && curTab != TOP && curTab != HIST) row.addView(Ic(ctx, P.DRAG, grey, 0.7f), LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) })
             if (selecting) {
                 val picked = sel.contains(t.id)
                 val box = FrameLayout(ctx).apply {
@@ -266,6 +311,9 @@ class MainActivity : Activity() {
         ti = prefs.getInt("theme", 0).coerceIn(0, themes.size - 1)
         customAcc = prefs.getInt("cacc", customAcc)
         customBg = prefs.getInt("cbg", customBg)
+        fadeSec = prefs.getInt("fade", 0)
+        skipSil = prefs.getBoolean("skip", false)
+        try { val o = JSONObject(prefs.getString("daily", "{}") ?: "{}"); for (k in o.keys()) daily[k] = o.getLong(k) } catch (e: Exception) { }
         sortMode = prefs.getInt("sort", 0)
         try { (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { favs.add(it.toLong()) } } catch (e: Exception) { }
         try { val o = JSONObject(prefs.getString("plays", "{}") ?: "{}"); for (k in o.keys()) plays[k.toLong()] = o.getInt(k) } catch (e: Exception) { }
@@ -280,6 +328,12 @@ class MainActivity : Activity() {
         val f = MediaController.Builder(this, token).buildAsync()
         f.addListener({ player = f.get(); player?.addListener(listener); updateNow(); tryRestore() }, ContextCompat.getMainExecutor(this))
         tick()
+        fadeTick()
+        val rc = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) { ui.postDelayed({ loadTracks() }, 1500) }
+        }
+        dlReceiver = rc
+        ContextCompat.registerReceiver(this, rc, android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED)
     }
 
     override fun onRequestPermissionsResult(code: Int, p: Array<out String>, r: IntArray) {
@@ -290,6 +344,8 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 77 && resultCode == RESULT_OK) afterDelete(pendingDel)
+        val u = data?.data
+        if (requestCode == 78 && resultCode == RESULT_OK && u != null) applyBackup(u)
     }
 
     override fun onBackPressed() {
@@ -298,12 +354,13 @@ class MainActivity : Activity() {
         else if (selecting) endSelect() else super.onBackPressed()
     }
 
-    override fun onStop() { saveLast(); super.onStop() }
+    override fun onStop() { saveLast(); saveDaily(); super.onStop() }
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
         eq?.release(); bass?.release()
         for (w in webs.values) w.destroy()
+        dlReceiver?.let { try { unregisterReceiver(it) } catch (e: Exception) { } }
         (player as? MediaController)?.release()
         super.onDestroy()
     }
@@ -316,6 +373,12 @@ class MainActivity : Activity() {
             curTv.text = fmt(p.currentPosition)
             durTv.text = fmt(p.duration)
         }
+        if (player?.isPlaying == true) {
+            val k = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+            daily[k] = (daily[k] ?: 0L) + 500L
+            if (++saveCnt % 20 == 0) saveDaily()
+        }
+        npRefresh?.invoke()
         ui.postDelayed({ tick() }, 500)
     }
 
@@ -334,20 +397,24 @@ class MainActivity : Activity() {
         speedTv.setTextColor(if (sp != 1f) c1 else grey)
         trackAdapter.notifyDataSetChanged()
         loadCover()
+        npRefresh?.invoke()
     }
 
     private fun loadCover() {
         val id = player?.currentMediaItem?.mediaId?.toLongOrNull() ?: -1L
         if (id == coverId) return
         coverId = id
+        animateSwitch()
         coverImg.setImageDrawable(null)
+        coverBmp = null
+        npRefresh?.invoke()
         coverNote.visibility = View.VISIBLE
         tintTop(null)
         if (id < 0 || Build.VERSION.SDK_INT < 29) return
         Thread {
             try {
                 val bmp = contentResolver.loadThumbnail(uriOf(id), Size(600, 600), null)
-                runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverNote.visibility = View.GONE; tintTop(android.graphics.Bitmap.createScaledBitmap(bmp, 1, 1, true).getPixel(0, 0)) } }
+                runOnUiThread { if (coverId == id) { coverImg.setImageBitmap(bmp); coverBmp = bmp; npRefresh?.invoke(); coverNote.visibility = View.GONE; tintTop(android.graphics.Bitmap.createScaledBitmap(bmp, 1, 1, true).getPixel(0, 0)) } }
             } catch (e: Exception) { }
         }.start()
     }
@@ -414,7 +481,7 @@ class MainActivity : Activity() {
             else -> (pls[cur] ?: mutableListOf<Long>()).mapNotNull { id -> all.find { it.id == id } }
         }
         if (query.isNotBlank()) l = l.filter { (it.title + " " + it.artist).contains(query, true) }
-        if (fKind.isNotEmpty()) l = l.filter { when (fKind) { "artist" -> it.artist == fVal; "album" -> it.album == fVal; else -> it.folder == fVal } }
+        if (fKind.isNotEmpty()) l = l.filter { when (fKind) { "artist" -> it.artist == fVal; "album" -> it.album == fVal; "dup" -> dupAll.contains(it.id); else -> it.folder == fVal } }
         shown = l
         trackAdapter.notifyDataSetChanged()
     }
@@ -624,6 +691,7 @@ class MainActivity : Activity() {
     private fun afterDelete(ids: List<Long>) {
         val cur = player?.currentMediaItem?.mediaId?.toLongOrNull()
         if (cur != null && ids.contains(cur)) { player?.stop(); player?.clearMediaItems() }
+        if (fKind == "dup") { fKind = ""; fVal = "" }
         endSelect(); loadTracks()
     }
 
@@ -641,6 +709,13 @@ class MainActivity : Activity() {
             row(P.BOLT, "Скорость воспроизведения") { speedDialog() },
             row(P.TIMER, "Таймер сна") { sleepDialog() },
             row(P.EQ, "Эквалайзер и бас") { eqDialog() },
+            row(P.GLOBE, "Бесплатная музыка") { onlineSheet() },
+            row(P.CHART, "Итоги недели и года") { recap() },
+            row(P.BOLT, "Плавный переход между треками") { fadeSheet() },
+            row(P.NEXT, if (skipSil) "Пропуск тишины: включён" else "Пропуск тишины: выключен") { toggleSkip() },
+            row(P.UPLOAD, "Резервная копия в файл") { backup() },
+            row(P.DOWNLOAD, "Восстановить из файла") { restore() },
+            row(P.COPY, "Найти дубликаты") { findDups() },
             row(P.UPLOAD, "Экспорт плейлистов") { exportPls() },
             row(P.DOWNLOAD, "Импорт плейлистов") { importPls() }
         ))
@@ -989,6 +1064,358 @@ class MainActivity : Activity() {
         topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
     }
 
+    private fun reorder(a: Int, b: Int) {
+        val cur = tab ?: return
+        val m = shown.map { it.id }.toMutableList()
+        val x = m.removeAt(a)
+        m.add(b, x)
+        pls[cur] = m
+        savePls(); refreshList()
+    }
+
+    private fun findDups() {
+        val groups = HashMap<String, MutableList<Track>>()
+        for (t in all) groups.getOrPut(t.title.trim().lowercase() + "|" + t.artist.trim().lowercase()) { mutableListOf() }.add(t)
+        val dups = groups.values.filter { it.size > 1 }
+        if (dups.isEmpty()) { toast("Дубликатов не найдено"); return }
+        dupAll.clear(); sel.clear()
+        for (g in dups) {
+            val sorted = g.sortedBy { it.id }
+            for (t in sorted) dupAll.add(t.id)
+            for (t in sorted.drop(1)) sel.add(t.id)
+        }
+        fKind = "dup"; fVal = "Дубликаты"; tab = null; selecting = true
+        refreshTabs(); refreshList(); refreshTop()
+        toast("Лишних копий: " + sel.size + ". Проверьте и нажмите на корзину")
+    }
+
+    private fun nowPlaying() {
+        val d = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val aura = Aura(this).apply { color = c1; baseColor = base }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(16), dp(24), dp(24)) }
+        val heart = Ic(this, P.HEART, grey, 0.6f).apply { setOnClickListener { player?.currentMediaItem?.mediaId?.toLongOrNull()?.let { toggleFav(it) } } }
+        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        top.addView(Ic(this, P.DOWN, white, 0.7f).apply { setOnClickListener { d.dismiss() } }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        top.addView(TextView(this).apply { text = "Сейчас играет"; textSize = 14f; setTextColor(grey); gravity = Gravity.CENTER }, LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(heart, LinearLayout.LayoutParams(dp(46), dp(46)))
+        col.addView(top)
+        val side = minOf(resources.displayMetrics.widthPixels - dp(48), (resources.displayMetrics.heightPixels * 0.42f).toInt())
+        val cover = FrameLayout(this).apply { background = rr(mix(c1, 0.55f), 18); clipToOutline = true; elevation = dp(20).toFloat() }
+        val img = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        val note = Ic(this, P.NOTE, Color.argb(200, 255, 255, 255), 0.4f)
+        cover.addView(img, FrameLayout.LayoutParams(-1, -1))
+        cover.addView(note, FrameLayout.LayoutParams(-1, -1))
+        col.addView(cover, LinearLayout.LayoutParams(side, side).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(20) })
+        val title = TextView(this).apply { textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER }
+        val artist = TextView(this).apply { textSize = 15f; setTextColor(grey); setSingleLine(); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER }
+        col.addView(title, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(28) })
+        col.addView(artist, LinearLayout.LayoutParams(-1, -2))
+        val cur = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(grey) }
+        val dur = TextView(this).apply { text = "0:00"; textSize = 12f; setTextColor(grey) }
+        val sk = SeekBar(this).apply {
+            progressTintList = ColorStateList.valueOf(c1)
+            thumbTintList = ColorStateList.valueOf(white)
+            progressBackgroundTintList = ColorStateList.valueOf(faint)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) {}
+                override fun onStartTrackingTouch(s: SeekBar) { npDrag = true }
+                override fun onStopTrackingTouch(s: SeekBar) { npDrag = false; player?.seekTo(s.progress * 1000L) }
+            })
+        }
+        val sr = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        sr.addView(cur)
+        sr.addView(sk, LinearLayout.LayoutParams(0, -2, 1f))
+        sr.addView(dur)
+        col.addView(sr, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+        val shuf = Ic(this, P.SHUFFLE, grey, 0.55f).apply { setOnClickListener { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } } }
+        val prev = Ic(this, P.PREV, white, 0.6f).apply { setOnClickListener { player?.seekToPrevious() } }
+        val play = Ic(this, P.PLAY, base, 0.55f).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(white) }
+            setOnClickListener { player?.let { if (it.isPlaying) it.pause() else it.play() } }
+        }
+        val next = Ic(this, P.NEXT, white, 0.6f).apply { setOnClickListener { player?.seekToNext() } }
+        val rep = Ic(this, P.REPEAT, grey, 0.55f).apply {
+            setOnClickListener {
+                player?.let {
+                    it.repeatMode = when (it.repeatMode) {
+                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                        else -> Player.REPEAT_MODE_OFF
+                    }
+                }
+            }
+        }
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        for ((v, sz) in listOf(Pair<View, Int>(shuf, 48), Pair<View, Int>(prev, 56), Pair<View, Int>(play, 70), Pair<View, Int>(next, 56), Pair<View, Int>(rep, 48)))
+            row.addView(v, LinearLayout.LayoutParams(dp(sz), dp(sz)).apply { leftMargin = dp(8); rightMargin = dp(8) })
+        col.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+
+        var shown0: android.graphics.Bitmap? = null
+        npRefresh = {
+            val p = player
+            if (p != null) {
+                val m = p.currentMediaItem
+                title.text = m?.mediaMetadata?.title ?: "Выберите трек"
+                artist.text = m?.mediaMetadata?.artist ?: ""
+                play.setIcon(if (p.isPlaying) P.PAUSE else P.PLAY)
+                shuf.tint(if (p.shuffleModeEnabled) c1 else grey)
+                rep.setIcon(if (p.repeatMode == Player.REPEAT_MODE_ONE) P.REPEAT_ONE else P.REPEAT)
+                rep.tint(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else grey)
+                heart.tint(if (favs.contains(m?.mediaId?.toLongOrNull() ?: -1L)) c1 else grey)
+                aura.active = p.isPlaying
+                if (!npDrag && p.duration > 0) {
+                    sk.max = (p.duration / 1000).toInt()
+                    sk.progress = (p.currentPosition / 1000).toInt()
+                    cur.text = fmt(p.currentPosition)
+                    dur.text = fmt(p.duration)
+                }
+                val b = coverBmp
+                if (b !== shown0) {
+                    shown0 = b
+                    if (b != null) { img.setImageBitmap(b); note.visibility = View.GONE } else { img.setImageDrawable(null); note.visibility = View.VISIBLE }
+                }
+            }
+        }
+        val gd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: e2.x)
+                val dy = e2.y - (e1?.y ?: e2.y)
+                if (kotlin.math.abs(dx) > kotlin.math.abs(dy) && kotlin.math.abs(dx) > dp(80)) {
+                    if (dx < 0) player?.seekToNext() else player?.seekToPrevious()
+                    return true
+                }
+                if (dy > dp(120)) { d.dismiss(); return true }
+                return false
+            }
+        })
+        val frame = FrameLayout(this)
+        frame.addView(aura, FrameLayout.LayoutParams(-1, -1))
+        frame.addView(col, FrameLayout.LayoutParams(-1, -1))
+        frame.setOnTouchListener { _, ev -> gd.onTouchEvent(ev); true }
+        d.setContentView(frame)
+        d.setOnDismissListener { npRefresh = null }
+        d.show()
+        npRefresh?.invoke()
+    }
+
+    private fun saveDaily() {
+        val o = JSONObject()
+        for ((k, v) in daily) o.put(k, v)
+        prefs.edit().putString("daily", o.toString()).apply()
+    }
+
+    private fun fadeTick() {
+        val p = player
+        if (p != null) {
+            if (fadeSec <= 0) { if (p.volume != 1f) p.volume = 1f }
+            else if (p.isPlaying && p.duration > 0) {
+                val f = fadeSec * 1000f
+                val pos = p.currentPosition.toFloat()
+                val left = p.duration - pos
+                p.volume = minOf(1f, pos / f, left / f).coerceIn(0.03f, 1f)
+            }
+        }
+        ui.postDelayed({ fadeTick() }, 120)
+    }
+
+    private fun fadeSheet() {
+        sheet("Плавный переход", listOf(0, 2, 4, 6, 8).map { sec ->
+            row(P.BOLT, if (sec == 0) "Выключен" else sec.toString() + " сек") {
+                fadeSec = sec; prefs.edit().putInt("fade", sec).apply()
+                toast(if (sec == 0) "Плавный переход выключен" else "Переход: " + sec + " сек")
+            }
+        })
+    }
+
+    private fun toggleSkip() {
+        skipSil = !skipSil
+        prefs.edit().putBoolean("skip", skipSil).apply()
+        Audio.exo?.setSkipSilenceEnabled(skipSil)
+        toast(if (skipSil) "Тишина будет пропускаться" else "Пропуск тишины выключен")
+    }
+
+    private fun animateSwitch() {
+        (coverImg.parent as? View)?.let { it.scaleX = 0.88f; it.scaleY = 0.88f; it.alpha = 0.3f; it.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(380).start() }
+        nowTitle.translationX = dp(36).toFloat(); nowTitle.alpha = 0f
+        nowTitle.animate().translationX(0f).alpha(1f).setDuration(300).start()
+        nowArtist.alpha = 0f
+        nowArtist.animate().alpha(1f).setDuration(450).start()
+    }
+
+    private fun hours(ms: Long): String = String.format("%d ч %02d мин", ms / 3600000, (ms / 60000) % 60)
+
+    private fun recap() {
+        val fk = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+        val days = ArrayList<Long>()
+        val labels = ArrayList<String>()
+        var week = 0L
+        for (i in 6 downTo 0) {
+            val c = java.util.Calendar.getInstance()
+            c.add(java.util.Calendar.DAY_OF_YEAR, -i)
+            val ms = daily[fk.format(c.time)] ?: 0L
+            days.add(ms); week += ms
+            labels.add(c.get(java.util.Calendar.DAY_OF_MONTH).toString())
+        }
+        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
+        val yearMs = daily.filter { it.key.startsWith(year) }.values.sum()
+        val topTrack = plays.entries.maxByOrNull { it.value }?.let { e -> all.find { it.id == e.key }?.title }
+        val byArtist = HashMap<String, Int>()
+        for ((id, n) in plays) all.find { it.id == id }?.let { if (it.artist.isNotEmpty()) byArtist[it.artist] = (byArtist[it.artist] ?: 0) + n }
+        val topArtist = byArtist.entries.maxByOrNull { it.value }?.key
+        val box = sheetBox("Итоги")
+        fun line(t: String) = box.addView(TextView(this).apply { text = t; textSize = 16f; setTextColor(white); setPadding(dp(14), dp(4), dp(14), dp(4)) })
+        line("За 7 дней: " + hours(week))
+        line("За " + year + " год: " + hours(yearMs))
+        line("Любимый трек: " + (topTrack ?: "пока нет"))
+        line("Любимый исполнитель: " + (topArtist ?: "пока нет"))
+        val bars = LinearLayout(this).apply { gravity = Gravity.BOTTOM; setPadding(dp(14), dp(14), dp(14), 0) }
+        val mx = maxOf(1L, days.maxOrNull() ?: 1L)
+        for (i in days.indices) {
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            col.addView(View(this).apply { background = rr(c1, 4) }, LinearLayout.LayoutParams(dp(18), maxOf(dp(4), (dp(90) * days[i] / mx).toInt())))
+            col.addView(TextView(this).apply { text = labels[i]; textSize = 11f; setTextColor(grey); gravity = Gravity.CENTER })
+            bars.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        box.addView(bars, LinearLayout.LayoutParams(-1, -2))
+        present(android.app.Dialog(this), box)
+    }
+
+    private fun backup() {
+        val o = JSONObject()
+        for ((k, v) in prefs.all) o.put(k, v)
+        val text = o.toString()
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val cv = android.content.ContentValues()
+                cv.put(MediaStore.MediaColumns.DISPLAY_NAME, "player-backup.json")
+                cv.put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, "Download")
+                val u = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)
+                if (u != null) {
+                    contentResolver.openOutputStream(u)?.use { it.write(text.toByteArray()) }
+                    toast("Копия сохранена: Загрузки, player-backup.json")
+                    return
+                }
+            }
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Резервная копия"))
+        } catch (e: Exception) { toast("Не удалось сохранить копию") }
+    }
+
+    private fun restore() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), 78)
+    }
+
+    private fun applyBackup(u: android.net.Uri) {
+        try {
+            val txt = contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: return
+            val o = JSONObject(txt)
+            val e = prefs.edit()
+            for (k in o.keys()) {
+                val v = o.get(k)
+                if (k == "last" || k == "pos") { if (v is Number) e.putLong(k, v.toLong()); continue }
+                when (v) {
+                    is Int -> e.putInt(k, v)
+                    is Long -> e.putLong(k, v)
+                    is Boolean -> e.putBoolean(k, v)
+                    is String -> e.putString(k, v)
+                }
+            }
+            e.apply()
+            toast("Копия восстановлена")
+            recreate()
+        } catch (ex: Exception) { toast("Не удалось прочитать файл") }
+    }
+
+    private fun httpGet(u: String): String {
+        val c = java.net.URL(u).openConnection() as java.net.HttpURLConnection
+        c.setRequestProperty("User-Agent", "PlayerApp/1.0")
+        c.connectTimeout = 15000
+        c.readTimeout = 20000
+        return try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
+    }
+
+    private fun js(o: JSONObject, k: String): String = if (o.isNull(k)) "" else o.optString(k, "").trim('[', ']', '"')
+
+    private fun download(url: String, name: String) {
+        try {
+            val safe = name.filter { it.isLetterOrDigit() || " .-_()".contains(it) }.ifEmpty { "track.mp3" }
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+            val r = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+                .setTitle(safe)
+                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_MUSIC, "FreeMusic/" + safe)
+                .addRequestHeader("User-Agent", "PlayerApp/1.0")
+            r.allowScanningByMediaScanner()
+            dm.enqueue(r)
+            toast("Скачивание: " + safe)
+        } catch (e: Exception) { toast("Не удалось начать скачивание") }
+    }
+
+    private fun onlineSheet() {
+        sheet("Бесплатная музыка", listOf(
+            row(P.SEARCH, "Поиск в Internet Archive") { ask("Что искать?", "") { searchIA(it) } },
+            row(P.SEARCH, "Поиск в Openverse (CC-музыка)") { ask("Что искать?", "") { searchOV(it) } },
+            row(P.GLOBE, "Free Music Archive (сайт)") { openWeb("br"); web?.loadUrl("https://freemusicarchive.org") }
+        ))
+    }
+
+    private fun searchIA(q: String) {
+        toast("Ищу…")
+        Thread {
+            try {
+                val query = "(" + q + ") AND mediatype:audio AND (licenseurl:*creativecommons* OR licenseurl:*publicdomain*)"
+                val j = JSONObject(httpGet("https://archive.org/advancedsearch.php?q=" + android.net.Uri.encode(query) + "&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&rows=20&output=json"))
+                val docs = j.getJSONObject("response").getJSONArray("docs")
+                val rows = ArrayList<Triple<String, String, () -> Unit>>()
+                for (k in 0 until docs.length()) {
+                    val o = docs.getJSONObject(k)
+                    val id = o.getString("identifier")
+                    val cr = js(o, "creator")
+                    rows.add(row(P.FOLDER, js(o, "title").ifEmpty { id } + (if (cr.isNotEmpty()) " — " + cr else "")) { iaFiles(id) })
+                }
+                runOnUiThread { if (rows.isEmpty()) toast("Ничего не найдено") else sheet("Internet Archive", rows) }
+            } catch (e: Exception) { runOnUiThread { toast("Нет связи или ошибка поиска") } }
+        }.start()
+    }
+
+    private fun iaFiles(id: String) {
+        toast("Загружаю список…")
+        Thread {
+            try {
+                val files = JSONObject(httpGet("https://archive.org/metadata/" + id)).getJSONArray("files")
+                val rows = ArrayList<Triple<String, String, () -> Unit>>()
+                for (k in 0 until files.length()) {
+                    val n = files.getJSONObject(k).optString("name", "")
+                    if (n.lowercase().endsWith(".mp3") && rows.size < 40) {
+                        rows.add(row(P.DOWNLOAD, n.substringAfterLast('/')) { download("https://archive.org/download/" + id + "/" + android.net.Uri.encode(n, "/"), n.substringAfterLast('/')) })
+                    }
+                }
+                runOnUiThread { if (rows.isEmpty()) toast("В этой записи нет mp3") else sheet("Выберите файл", rows) }
+            } catch (e: Exception) { runOnUiThread { toast("Не удалось получить список файлов") } }
+        }.start()
+    }
+
+    private fun searchOV(q: String) {
+        toast("Ищу…")
+        Thread {
+            try {
+                val res = JSONObject(httpGet("https://api.openverse.org/v1/audio/?q=" + android.net.Uri.encode(q) + "&page_size=20")).getJSONArray("results")
+                val rows = ArrayList<Triple<String, String, () -> Unit>>()
+                for (k in 0 until res.length()) {
+                    val o = res.getJSONObject(k)
+                    val url = js(o, "url")
+                    if (url.isEmpty()) continue
+                    val title = js(o, "title").ifEmpty { "track" }
+                    val ext = js(o, "filetype").ifEmpty { "mp3" }
+                    val lic = "CC " + js(o, "license").uppercase() + " " + js(o, "license_version")
+                    rows.add(row(P.DOWNLOAD, title + " · " + lic) { download(url, title + "." + ext) })
+                }
+                runOnUiThread { if (rows.isEmpty()) toast("Ничего не найдено") else sheet("Openverse", rows) }
+            } catch (e: Exception) { runOnUiThread { toast("Нет связи или ошибка поиска") } }
+        }.start()
+    }
+
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
@@ -1040,6 +1467,7 @@ class MainActivity : Activity() {
         coverNote = Ic(this, P.NOTE, Color.argb(200, 255, 255, 255), 0.4f)
         box.addView(coverImg, FrameLayout.LayoutParams(-1, -1))
         box.addView(coverNote, FrameLayout.LayoutParams(-1, -1))
+        box.setOnClickListener { nowPlaying() }
         header.addView(box, LinearLayout.LayoutParams(side, side).apply { topMargin = dp(18) })
 
         nowTitle = TextView(this).apply { text = "Выберите трек"; textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END }
@@ -1058,6 +1486,27 @@ class MainActivity : Activity() {
             setOnItemClickListener { _, _, pos, _ ->
                 val i = pos - headerViewsCount
                 if (i >= 0 && i < shown.size) { if (selecting) toggleSel(shown[i]) else playFrom(i) }
+            }
+            setOnTouchListener { _, ev ->
+                val cur = tab
+                val inPl = cur != null && cur != FAV && cur != REC && cur != TOP && cur != HIST && !selecting
+                when (ev.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        if (inPl && ev.x > width - dp(72)) {
+                            val i = pointToPosition(ev.x.toInt(), ev.y.toInt()) - headerViewsCount
+                            if (i >= 0 && i < shown.size) { dragIdx = i; requestDisallowInterceptTouchEvent(true); true } else false
+                        } else false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (dragIdx >= 0) {
+                            val i = pointToPosition(width / 2, ev.y.toInt()) - headerViewsCount
+                            if (i >= 0 && i < shown.size && i != dragIdx) { reorder(dragIdx, i); dragIdx = i }
+                            true
+                        } else false
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val was = dragIdx >= 0; dragIdx = -1; trackAdapter.notifyDataSetChanged(); was }
+                    else -> false
+                }
             }
             setOnItemLongClickListener { _, _, pos, _ ->
                 val i = pos - headerViewsCount
