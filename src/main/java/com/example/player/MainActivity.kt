@@ -47,6 +47,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object P {
+    const val CHEVRON = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"
     const val DOWN = "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"
     const val COPY = "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
     const val DRAG = "M20 9H4v2h16V9zM4 15h16v-2H4v2z"
@@ -170,15 +171,144 @@ class PlaybackService : MediaSessionService() {
 class MainActivity : Activity() {
     data class Track(val id: Long, val title: String, val artist: String, val album: String = "", val folder: String = "")
 
-    class Theme(val name: String, val bg: String, val acc: String, val dark: Boolean = true)
-    private val themes = listOf(
-        Theme("Spotify", "#121212", "#1DB954"), Theme("AMOLED", "#000000", "#1DB954"), Theme("Неон", "#0A0416", "#FF2E93"),
-        Theme("Циан", "#05141A", "#00E5FF"), Theme("Закат", "#1A0C08", "#FF6A00"), Theme("Фиолет", "#0F0818", "#A855F7"),
-        Theme("Лайм", "#0B1100", "#B6FF00"), Theme("Океан", "#050F1F", "#3B82F6"), Theme("Рубин", "#150507", "#FF1744"),
-        Theme("Золото", "#15110A", "#FFC107"), Theme("Мята", "#07140F", "#2DD4BF"), Theme("Сакура", "#1A0F14", "#FF8FB1"),
-        Theme("Лаванда", "#120F1F", "#B39DDB"), Theme("Кофе", "#1A130E", "#D7A86E"), Theme("Лес", "#0A140C", "#7CB342"),
-        Theme("Графит", "#1C1D21", "#9AA5B1"), Theme("Светлая", "#F5F5F7", "#1DB954", false), Theme("Бумага", "#F4EFE6", "#D2691E", false), Theme("Свой", "#121212", "#1DB954")
-    )
+    class Theme(val name: String, val bg: String, val acc: String, val dark: Boolean = true, val acc2: String = "", val cat: String = "")
+    private val themeData = """
+Spotify|121212|1DB954|1ED760|dx
+AMOLED|000000|1DB954|00E676|dm
+Неон|0A0416|FF2E93|7C3AED|dn
+Циан|05141A|00E5FF|3B82F6|dn
+Закат|1A0C08|FF6A00|FF1744|dw
+Фиолет|0F0818|A855F7|FF2E93|dn
+Лайм|0B1100|B6FF00|00C853|dn
+Океан|050F1F|3B82F6|00E5FF|dc
+Рубин|150507|FF1744|FF8A80|dw
+Золото|15110A|FFC107|FF8F00|dw
+Мята|07140F|2DD4BF|34D399|dg
+Сакура|1A0F14|FF8FB1|F48FB1|dp
+Лаванда|120F1F|B39DDB|9575CD|dp
+Кофе|1A130E|D7A86E|A1887F|dw
+Лес|0A140C|7CB342|2E7D32|dg
+Графит|1C1D21|9AA5B1|607D8B|dm
+Светлая|F5F5F7|1DB954|009688|lx
+Бумага|F4EFE6|D2691E|8D6E63|lr
+Киберпанк|0B0B1A|F5D300|FF2A6D|dn
+Синтвейв|120A2E|FF71CE|01CDFE|dn
+Вейпорвейв|1A0B2E|B967FF|05FFA1|dn
+Тропик|06201C|00F5D4|FEE440|dn
+Электрик|060A24|4D6BFF|00E0FF|dn
+Токио|140818|FF3CAC|784BA0|dn
+Лазер|0A0A0F|00FF85|FF0080|dn
+Матрица|020D05|00FF41|008F11|dn
+Ультрафиолет|0C0420|7B2FFF|F107A3|dn
+Плазма|10061F|E040FB|40C4FF|dn
+Кислота|0A0F00|CCFF00|FF00E5|dn
+Голограмма|08101C|7DF9FF|FF9CEE|dn
+Неон-бар|120515|FF4DFF|FFEA00|dn
+Радиация|0A1200|9DFF00|FFD600|dn
+Лава|180704|FF4500|FFB300|dw
+Костёр|1A0D05|FF8C1A|E53935|dw
+Янтарь|1A1205|FFB000|FF6F00|dw
+Мандарин|1A0E05|FF9F1C|FF5E00|dw
+Персик|1C0E0B|FFAB91|FF7043|dw
+Корица|1B0F0A|C8794B|8D5524|dw
+Карамель|1C130A|E0A458|B5651D|dw
+Малина|1A0610|E91E63|FF80AB|dw
+Гранат|170608|C2185B|FF5252|dw
+Вишня|140610|D81B60|AD1457|dw
+Рассвет|1B0F14|FF8A65|FFD54F|dw
+Огонь|150503|FF3D00|FFC400|dw
+Терракота|1B0E0A|D9825B|A0522D|dw
+Паприка|180806|E8481C|FF9E3D|dw
+Мёд|1A1405|FFC947|E59500|dw
+Лёд|06141C|A5F3FC|60A5FA|dc
+Арктика|0A1620|7DD3FC|C4B5FD|dc
+Глубина|030B1A|2563EB|22D3EE|dc
+Бирюза|041A1A|14B8A6|5EEAD4|dc
+Сапфир|060D26|3D5AFE|82B1FF|dc
+Лагуна|04181F|26C6DA|80DEEA|dc
+Полярная ночь|070E1C|64B5F6|B388FF|dc
+Туман|10161C|90A4AE|B0BEC5|dc
+Волна|051521|29B6F6|00BFA5|dc
+Звёздная ночь|080B1F|8C9EFF|FFD180|dc
+Космос|05030F|7C4DFF|18FFFF|dc
+Индиго|0C0A24|5C6BC0|9FA8DA|dc
+Сталь|11151A|78909C|4FC3F7|dc
+Метель|0E141A|E1F5FE|81D4FA|dc
+Нептун|041022|448AFF|69F0AE|dc
+Изумруд|04160F|10B981|6EE7B7|dg
+Хвоя|06140B|2E7D32|A5D6A7|dg
+Мох|0E1408|8BC34A|558B2F|dg
+Джунгли|041208|00C853|FFEA00|dg
+Оливка|12140A|9E9D24|C0CA33|dg
+Папоротник|08140C|66BB6A|26A69A|dg
+Бамбук|0F1608|AED581|827717|dg
+Эвкалипт|0B1614|80CBC4|4DB6AC|dg
+Луг|0D1608|9CCC65|FFF176|dg
+Роса|0A1612|69F0AE|B2FF59|dg
+Малахит|041812|00BFA5|1DE9B6|dg
+Саванна|171406|CDDC39|FFB300|dg
+Зефир|1C1219|F8BBD0|CE93D8|dp
+Леденец|181220|F48FB1|80DEEA|dp
+Маршмеллоу|1A1520|E1BEE7|FFCCBC|dp
+Сирень|171224|CE93D8|9FA8DA|dp
+Мятная жвачка|0F1A18|A5F3E0|F8BBD0|dp
+Облако|151A24|BBDEFB|E1BEE7|dp
+Лимонад|1A1A0E|FFF59D|A5D6A7|dp
+Фламинго|1E1218|FF8FA3|FFC2D1|dp
+Ретро 80-х|1A0F2E|FF6B9D|FFD166|dr
+Кассета|1B1410|E07A5F|F2CC8F|dr
+Винил|141010|D4A373|CCD5AE|dr
+Аркада|0F0F2D|FF595E|FFCA3A|dr
+Пиксель|12122A|8AC926|1982C4|dr
+Ламповый|1B1208|FFB74D|A1887F|dr
+Сепия|1C150E|C9A66B|8B6B3E|dr
+Диско|140A24|FF47C8|47F0FF|dr
+Старое кино|141414|E6C46C|9E9E9E|dr
+Уголь|0F0F10|E0E0E0|9E9E9E|dm
+Чернила|0A0A12|9FA8DA|5C6BC0|dm
+Асфальт|16181B|B0BEC5|78909C|dm
+Нуар|0B0B0B|FFFFFF|BDBDBD|dm
+Дым|141416|BDBDBD|FF8A65|dm
+Гранит|1B1C1E|A1A9B0|FFB74D|dm
+Обсидиан|08080C|BB86FC|03DAC6|dm
+Северное сияние|06121F|3DFFB0|7C4DFF|dx
+Закат у моря|140A1E|FF7E5F|FEB47B|dx
+Галактика|07041A|B388FF|FF80AB|dx
+Фантазия|0E0A22|7F5AF0|2CB67D|dx
+Радуга|0D0D14|FF5E5E|5EA8FF|dx
+Огненный лёд|0A0E1A|FF5252|40C4FF|dx
+Персидский|0E0A1E|3F51B5|FFC107|dx
+Тёмный шоколад|140C08|8D6E63|FFCCBC|dx
+Бордо|160609|9E2A3C|F5B7B1|dx
+Королевский|0D0825|6A1B9A|FFD740|dx
+Морской бриз|07181E|4DD0E1|FFAB91|dx
+Молоко|FAFAFA|1DB954|00897B|lm
+Ваниль|FFF8E7|E0A800|D17A22|lp
+Светлая лаванда|F3EEFB|7E57C2|B39DDB|lp
+Розовый кварц|FDEFF4|D81B60|F06292|lp
+Мятная свежесть|ECFAF4|00A676|4DD0C1|lg
+Небо|EAF4FF|1E88E5|64B5F6|lc
+Лимонный сорбет|FFFBE0|C6A700|F9A825|lp
+Персиковый|FFF0EA|F4511E|FF8A65|lw
+Облачно|EEF1F4|546E7A|90A4AE|lm
+Лаймовый|F4FBE8|689F38|AED581|lg
+Песок|F5EBDC|B07D3B|8D6E63|lr
+Крафт|EADFCB|8D6E63|C9A66B|lr
+Светлая сакура|FFF1F5|EC407A|F8BBD0|lp
+Светлый океан|E6F7FA|0097A7|4DD0E1|lc
+Морковный|FFF3E8|EF6C00|FFB74D|lw
+Ягодный йогурт|FBEFFA|AB47BC|F48FB1|lp
+Ромашка|FFFFF0|F9A825|66BB6A|lg
+Чайная роза|FCEFEA|C2185B|FFAB91|lp
+Серебро|F0F2F5|607D8B|26A69A|lm
+Весна|F0FAEC|43A047|FFB300|lg
+Ледяная|EEF6FC|0277BD|7E57C2|lc
+Арбуз|FFEFF1|E53935|43A047|lx
+"""
+    private val themes: List<Theme> = themeData.trimIndent().lines().filter { it.isNotBlank() }.map { l ->
+        val p = l.split("|")
+        Theme(p[0], "#" + p[1], "#" + p[2], p[4].startsWith("d"), "#" + p[3], p[4].substring(1))
+    } + Theme("Свой", "#121212", "#1DB954", true, "#1DB954", "c")
 
     private var all = listOf<Track>()
     private var shown = listOf<Track>()
@@ -199,6 +329,11 @@ class MainActivity : Activity() {
     private val plays = HashMap<Long, Int>()
     private val hist = ArrayList<Long>()
     private var rootV: View? = null
+    private var c2 = 0
+    private var curTab = 0
+    private lateinit var settingsPage: ScrollView
+    private lateinit var settingsBox: LinearLayout
+    private lateinit var navBar: LinearLayout
     private var fadeSec = 0
     private var skipSil = false
     private val daily = HashMap<String, Long>()
@@ -337,7 +472,7 @@ class MainActivity : Activity() {
         else requestPermissions(perms.toTypedArray(), 1)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val f = MediaController.Builder(this, token).buildAsync()
-        f.addListener({ player = f.get(); player?.addListener(listener); updateNow(); tryRestore() }, ContextCompat.getMainExecutor(this))
+        f.addListener({ try { player = f.get() } catch (e: Exception) { toast("Не удалось подключить плеер") }; player?.addListener(listener); updateNow(); tryRestore() }, ContextCompat.getMainExecutor(this))
         tick()
         fadeTick()
         val rc = object : android.content.BroadcastReceiver() {
@@ -361,6 +496,7 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         if (customView != null) { customCb?.onCustomViewHidden(); ytChrome.onHideCustomView() }
+        else if (curTab == 1) showTab(0)
         else if (ytMode) { if (web?.canGoBack() == true) web?.goBack() else setYt(false) }
         else if (selecting) endSelect() else super.onBackPressed()
     }
@@ -472,7 +608,7 @@ class MainActivity : Activity() {
         .build()
 
     private fun playFrom(i: Int) {
-        val p = player ?: return
+        val p = player ?: run { toast("Плеер подключается, нажми ещё раз через секунду"); return }
         p.setMediaItems(shown.map { item(it) }, i, 0L)
         p.prepare()
         p.play()
@@ -615,26 +751,66 @@ class MainActivity : Activity() {
         present(d, box)
     }
 
-    private fun themeSheet() {
+    private fun mx(c: Int, b: Int, f: Float) = Color.rgb(
+        (Color.red(c) * f + Color.red(b) * (1 - f)).toInt(),
+        (Color.green(c) * f + Color.green(b) * (1 - f)).toInt(),
+        (Color.blue(c) * f + Color.blue(b) * (1 - f)).toInt())
+
+    private fun applyTheme(i: Int) {
+        if (i == themes.size - 1) { colorEditor(); return }
+        ti = i
+        prefs.edit().putInt("theme", i).apply()
+        rebuild()
+    }
+
+    private fun themeGallery(cat: String = "Все") {
         val d = android.app.Dialog(this)
-        val box = sheetBox("Темы")
+        val box = sheetBox("Темы: " + (themes.size - 1))
+        val cats = listOf("Все", "Тёмные", "Светлые", "Неон", "Пастель", "Природа", "Тёплые", "Холодные", "Ретро", "Моно")
+        val hs = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val cr = LinearLayout(this)
+        for (c in cats) cr.addView(chip(c, c == cat) { d.dismiss(); themeGallery(c) }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) })
+        hs.addView(cr)
+        box.addView(hs, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(8), 0, dp(8), dp(12)) })
+        val list = themes.withIndex().filter { iv ->
+            val t = iv.value
+            when (cat) {
+                "Тёмные" -> t.dark
+                "Светлые" -> !t.dark
+                "Неон" -> t.cat == "n"
+                "Пастель" -> t.cat == "p"
+                "Природа" -> t.cat == "g"
+                "Тёплые" -> t.cat == "w"
+                "Холодные" -> t.cat == "c"
+                "Ретро" -> t.cat == "r"
+                "Моно" -> t.cat == "m"
+                else -> true
+            }
+        }
         var line: LinearLayout? = null
-        themes.forEachIndexed { i, th ->
-            if (i % 3 == 0) { line = LinearLayout(this); box.addView(line, LinearLayout.LayoutParams(-1, -2)) }
+        list.forEachIndexed { n, iv ->
+            val i = iv.index
+            val t = iv.value
+            if (n % 3 == 0) { line = LinearLayout(this); box.addView(line, LinearLayout.LayoutParams(-1, -2)) }
             val cu = i == themes.size - 1
-            val bgc = if (cu) customBg else Color.parseColor(th.bg)
-            val ac = if (cu) customAcc else Color.parseColor(th.acc)
+            val bgc = if (cu) customBg else Color.parseColor(t.bg)
+            val a1 = if (cu) customAcc else Color.parseColor(t.acc)
+            val a2 = if (cu) customAcc else Color.parseColor(t.acc2.ifEmpty { t.acc })
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(6), dp(6), dp(6), dp(8))
-                setOnClickListener { d.dismiss(); if (cu) colorEditor() else { ti = i; prefs.edit().putInt("theme", i).apply(); rebuild() } }
+                setOnClickListener { d.dismiss(); applyTheme(i) }
             }
             val sw = FrameLayout(this).apply {
-                background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(bgc); setStroke(dp(if (i == ti) 3 else 1), if (i == ti) ac else Color.argb(70, 128, 128, 128)) }
+                background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(mx(a1, bgc, 0.34f), mx(a2, bgc, 0.10f), bgc)).apply {
+                    cornerRadius = dp(16).toFloat()
+                    setStroke(dp(if (i == ti) 3 else 1), if (i == ti) a1 else Color.argb(70, 128, 128, 128))
+                }
             }
-            sw.addView(View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(ac) } }, FrameLayout.LayoutParams(dp(28), dp(28)).apply { gravity = Gravity.CENTER })
+            sw.addView(View(this).apply { background = oval(a1) }, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.START).apply { setMargins(dp(10), dp(10), 0, 0) })
+            sw.addView(View(this).apply { background = rr(a2, 4) }, FrameLayout.LayoutParams(dp(34), dp(8), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(10), dp(12)) })
             cell.addView(sw, LinearLayout.LayoutParams(-1, dp(64)))
-            cell.addView(TextView(this).apply { text = th.name; textSize = 12f; setTextColor(white); gravity = Gravity.CENTER; setSingleLine() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
-            line!!.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
+            cell.addView(TextView(this).apply { text = t.name; textSize = 12f; setTextColor(white); gravity = Gravity.CENTER; setSingleLine(); ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+            line!!.addView(pressable(cell), LinearLayout.LayoutParams(0, -2, 1f))
         }
         present(d, box)
     }
@@ -729,33 +905,17 @@ class MainActivity : Activity() {
         et.requestFocus()
     }
 
-    private fun settings() {
-        sheet("Настройки", listOf(
-            row(P.PALETTE, "Темы") { themeSheet() },
-            row(P.SORT, "Сортировка") { sortSheet() },
-            row(P.BOLT, "Скорость воспроизведения") { speedDialog() },
-            row(P.TIMER, "Таймер сна") { sleepDialog() },
-            row(P.GLOBE, "Бесплатная музыка") { onlineSheet() },
-            row(P.CHART, "Итоги недели и года") { recap() },
-            row(P.BOLT, "Плавный переход между треками") { fadeSheet() },
-            row(P.NEXT, if (skipSil) "Пропуск тишины: включён" else "Пропуск тишины: выключен") { toggleSkip() },
-            row(P.UPLOAD, "Резервная копия в файл") { backup() },
-            row(P.DOWNLOAD, "Восстановить из файла") { restore() },
-            row(P.COPY, "Найти дубликаты") { findDups() },
-            row(P.UPLOAD, "Экспорт плейлистов") { exportPls() },
-            row(P.DOWNLOAD, "Импорт плейлистов") { importPls() }
-        ))
-    }
+    private fun settings() { showTab(1) }
 
     private fun sortSheet() {
         val n = listOf("По названию", "По исполнителю", "Сначала новые")
-        sheet("Сортировка", n.mapIndexed { i, t -> row(P.SORT, t) { sortMode = i; prefs.edit().putInt("sort", i).apply(); refreshList() } })
+        sheet("Сортировка", n.mapIndexed { i, t -> row(P.SORT, t) { sortMode = i; prefs.edit().putInt("sort", i).apply(); refreshList(); renderSettings() } })
     }
 
     private fun speedDialog() {
         val v = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
         val n = listOf("0.5×", "0.75×", "1× обычная", "1.25×", "1.5×", "2×")
-        sheet("Скорость", n.mapIndexed { i, t -> row(P.BOLT, t) { player?.setPlaybackSpeed(v[i]); updateNow() } })
+        sheet("Скорость", n.mapIndexed { i, t -> row(P.BOLT, t) { player?.setPlaybackSpeed(v[i]); updateNow(); renderSettings() } })
     }
 
     private fun sleepDialog() {
@@ -833,7 +993,7 @@ class MainActivity : Activity() {
 
     private fun tintTop(px: Int?) {
         val t = if (px == null) mix(c1, if (dark) 0.38f else 0.30f) else mix(px, if (dark) 0.50f else 0.35f)
-        rootV?.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(t, base, base))
+        rootV?.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(t, mix(c2, 0.12f), base))
         window.statusBarColor = t
     }
 
@@ -945,22 +1105,21 @@ class MainActivity : Activity() {
         }
         w.webChromeClient = ytChrome
         w.loadUrl(if (kind == "yt") "https://m.youtube.com" else "https://www.google.com")
-        (listView.parent as? LinearLayout)?.addView(w, LinearLayout.LayoutParams(-1, 0, 1f))
+        (listView.parent as? LinearLayout)?.let { par -> par.addView(w, par.childCount - 1, LinearLayout.LayoutParams(-1, 0, 1f)) }
         return w
     }
 
     private fun openWeb(kind: String) {
         webKind = kind
         if (kind == "yt") player?.pause()
+        if (curTab != 0) { curTab = 0; refreshNav() }
         setYt(true)
     }
 
     private fun setYt(on: Boolean) {
         ytMode = on
         if (on && web == null) webs[webKind] = mkWeb(webKind)
-        listView.visibility = if (on) View.GONE else View.VISIBLE
-        panelV?.visibility = if (on) View.GONE else View.VISIBLE
-        for ((k, w) in webs) w.visibility = if (on && k == webKind) View.VISIBLE else View.GONE
+        applyVisibility()
         refreshTop()
     }
 
@@ -1063,6 +1222,7 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         topBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        navBar.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
     }
 
     private fun reorder(a: Int, b: Int) {
@@ -1225,7 +1385,7 @@ class MainActivity : Activity() {
     private fun fadeSheet() {
         sheet("Плавный переход", listOf(0, 2, 4, 6, 8).map { sec ->
             row(P.BOLT, if (sec == 0) "Выключен" else sec.toString() + " сек") {
-                fadeSec = sec; prefs.edit().putInt("fade", sec).apply()
+                fadeSec = sec; prefs.edit().putInt("fade", sec).apply(); renderSettings()
                 toast(if (sec == 0) "Плавный переход выключен" else "Переход: " + sec + " сек")
             }
         })
@@ -1235,6 +1395,7 @@ class MainActivity : Activity() {
         skipSil = !skipSil
         prefs.edit().putBoolean("skip", skipSil).apply()
         Audio.exo?.setSkipSilenceEnabled(skipSil)
+        renderSettings()
         toast(if (skipSil) "Тишина будет пропускаться" else "Пропуск тишины выключен")
     }
 
@@ -1504,6 +1665,158 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 28) { v.outlineAmbientShadowColor = color; v.outlineSpotShadowColor = color }
     }
 
+    private fun pageViews(): List<View> = listOfNotNull<View>(topBar, listView, panelV, web, settingsPage).filter { it.visibility == View.VISIBLE }
+
+    private fun applyVisibility() {
+        val pl = curTab == 0
+        topBar.visibility = if (pl) View.VISIBLE else View.GONE
+        listView.visibility = if (pl && !ytMode) View.VISIBLE else View.GONE
+        panelV?.visibility = if (pl && !ytMode) View.VISIBLE else View.GONE
+        settingsPage.visibility = if (pl) View.GONE else View.VISIBLE
+        for ((k, w) in webs) w.visibility = if (pl && ytMode && k == webKind) View.VISIBLE else View.GONE
+    }
+
+    private fun showTab(t: Int) {
+        if (t == curTab) return
+        val out = pageViews()
+        val dir = if (t == 1) 1 else -1
+        curTab = t
+        refreshNav()
+        if (t == 1) renderSettings()
+        fun enter() {
+            applyVisibility()
+            for (v in pageViews()) {
+                v.alpha = 0f
+                v.translationX = dp(32).toFloat() * dir
+                v.animate().alpha(1f).translationX(0f).setDuration(240).start()
+            }
+        }
+        if (out.isEmpty()) { enter(); return }
+        for ((i, v) in out.withIndex()) {
+            v.animate().alpha(0f).translationX(-dp(24).toFloat() * dir).setDuration(130).withEndAction {
+                v.alpha = 1f; v.translationX = 0f
+                if (i == out.size - 1) enter()
+            }.start()
+        }
+    }
+
+    private fun refreshNav() {
+        navBar.removeAllViews()
+        val items = listOf(Pair(P.NOTE, "Плеер"), Pair(P.TUNE, "Настройки"))
+        for (i in items.indices) {
+            val sel = i == curTab
+            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setOnClickListener { showTab(i) } }
+            val pill = FrameLayout(this).apply { if (sel) background = rr(Color.argb(55, Color.red(c1), Color.green(c1), Color.blue(c1)), 16) }
+            pill.addView(Ic(this, items[i].first, if (sel) c1 else grey, 0.62f), FrameLayout.LayoutParams(-1, -1))
+            item.addView(pill, LinearLayout.LayoutParams(dp(68), dp(32)))
+            item.addView(TextView(this).apply { text = items[i].second; textSize = 12f; typeface = if (sel) Typeface.DEFAULT_BOLD else Typeface.DEFAULT; setTextColor(if (sel) c1 else grey); gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+            navBar.addView(pressable(item), LinearLayout.LayoutParams(0, -2, 1f))
+        }
+    }
+
+    private fun sCard(title: String): LinearLayout {
+        settingsBox.addView(TextView(this).apply { text = title.uppercase(); textSize = 12f; typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.1f; setTextColor(grey); setPadding(dp(6), dp(22), dp(6), dp(8)) })
+        val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rr(card, 22); setPadding(dp(4), dp(4), dp(4), dp(4)) }
+        settingsBox.addView(c, LinearLayout.LayoutParams(-1, -2))
+        return c
+    }
+
+    private fun sIcon(icon: String, tint: Int): View {
+        val ib = FrameLayout(this).apply { background = rr(Color.argb(46, Color.red(tint), Color.green(tint), Color.blue(tint)), 13) }
+        ib.addView(Ic(this, icon, tint, 0.58f), FrameLayout.LayoutParams(-1, -1))
+        return ib
+    }
+
+    private fun srow(p: LinearLayout, icon: String, title: String, value: String, tint: Int, f: () -> Unit) {
+        val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(11), dp(12), dp(11)); setOnClickListener { f() } }
+        line.addView(sIcon(icon, tint), LinearLayout.LayoutParams(dp(42), dp(42)))
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(TextView(this).apply { text = title; textSize = 16f; setTextColor(white) })
+        if (value.isNotEmpty()) col.addView(TextView(this).apply { text = value; textSize = 13f; setTextColor(grey) })
+        line.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+        line.addView(Ic(this, P.CHEVRON, grey, 0.6f), LinearLayout.LayoutParams(dp(24), dp(24)))
+        p.addView(pressable(line))
+    }
+
+    private fun srowSwitch(p: LinearLayout, icon: String, title: String, value: String, tint: Int, on: Boolean, f: () -> Unit) {
+        val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(11), dp(12), dp(11)) }
+        line.addView(sIcon(icon, tint), LinearLayout.LayoutParams(dp(42), dp(42)))
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(TextView(this).apply { text = title; textSize = 16f; setTextColor(white) })
+        if (value.isNotEmpty()) col.addView(TextView(this).apply { text = value; textSize = 13f; setTextColor(grey) })
+        line.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+        val sw = Switch(this).apply {
+            isChecked = on
+            thumbTintList = ColorStateList.valueOf(c1)
+            trackTintList = ColorStateList.valueOf(Color.argb(110, Color.red(c1), Color.green(c1), Color.blue(c1)))
+            setOnCheckedChangeListener { _, _ -> f() }
+        }
+        line.addView(sw)
+        line.setOnClickListener { sw.toggle() }
+        p.addView(pressable(line))
+    }
+
+    private fun renderSettings() {
+        val b = settingsBox
+        b.removeAllViews()
+        b.addView(TextView(this).apply { text = "Настройки"; textSize = 32f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setPadding(dp(4), 0, 0, 0) })
+        val th = themes[ti]
+        val soft = Color.argb(190, Color.red(onAcc), Color.green(onAcc), Color.blue(onAcc))
+        val hero = FrameLayout(this).apply { background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(mix(c1, 0.85f), mix(c2, 0.7f))).apply { cornerRadius = dp(26).toFloat() } }
+        val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(20), dp(22), dp(20)) }
+        hc.addView(TextView(this).apply { text = "ТЕМА"; textSize = 12f; typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.12f; setTextColor(soft) })
+        hc.addView(TextView(this).apply { text = th.name; textSize = 28f; typeface = Typeface.DEFAULT_BOLD; setTextColor(onAcc) })
+        hc.addView(TextView(this).apply { text = "В каталоге: " + (themes.size - 1) + " тем и свои цвета"; textSize = 13f; setTextColor(soft) })
+        hero.addView(hc, FrameLayout.LayoutParams(-1, -2))
+        val allBtn = TextView(this).apply {
+            text = "Все темы"; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(onAcc)
+            setPadding(dp(16), dp(9), dp(16), dp(9))
+            background = rr(Color.argb(60, Color.red(onAcc), Color.green(onAcc), Color.blue(onAcc)), 20)
+            setOnClickListener { themeGallery() }
+        }
+        hero.addView(pressable(allBtn), FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.BOTTOM).apply { setMargins(0, 0, dp(16), dp(16)) })
+        b.addView(hero, LinearLayout.LayoutParams(-1, dp(150)).apply { topMargin = dp(14) })
+
+        val hs = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val sr = LinearLayout(this).apply { setPadding(dp(2), dp(4), dp(2), dp(4)) }
+        themes.forEachIndexed { i, t ->
+            val cu = i == themes.size - 1
+            val bgc = if (cu) customBg else Color.parseColor(t.bg)
+            val a1 = if (cu) customAcc else Color.parseColor(t.acc)
+            val cell = FrameLayout(this).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(bgc); setStroke(dp(if (i == ti) 3 else 1), if (i == ti) white else Color.argb(70, 128, 128, 128)) }
+                setOnClickListener { applyTheme(i) }
+            }
+            cell.addView(View(this).apply { background = oval(a1) }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            sr.addView(pressable(cell), LinearLayout.LayoutParams(dp(46), dp(46)).apply { rightMargin = dp(10) })
+        }
+        hs.addView(sr)
+        b.addView(hs, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+
+        val ap = sCard("Внешний вид")
+        srow(ap, P.PALETTE, "Свои цвета", "Подбери акцент и фон сам", c1) { colorEditor() }
+        srow(ap, P.PALETTE, "Каталог тем", "Категории: неон, пастель, природа и другие", c2) { themeGallery() }
+
+        val pb = sCard("Воспроизведение")
+        srow(pb, P.BOLT, "Плавный переход", if (fadeSec == 0) "Выключен" else fadeSec.toString() + " сек", c1) { fadeSheet() }
+        srowSwitch(pb, P.NEXT, "Пропуск тишины", "Убирает паузы в начале и конце треков", c2, skipSil) { toggleSkip() }
+        val sp = player?.playbackParameters?.speed ?: 1f
+        srow(pb, P.FASTF, "Скорость", (if (sp % 1f == 0f) sp.toInt().toString() else sp.toString()) + "×", c1) { speedDialog() }
+        srow(pb, P.TIMER, "Таймер сна", "Остановит музыку через время", c2) { sleepDialog() }
+
+        val lb = sCard("Библиотека")
+        srow(lb, P.SORT, "Сортировка", listOf("По названию", "По исполнителю", "Сначала новые")[sortMode.coerceIn(0, 2)], c1) { sortSheet() }
+        srow(lb, P.COPY, "Найти дубликаты", "Лишние копии треков", c2) { showTab(0); findDups() }
+        srow(lb, P.GLOBE, "Бесплатная музыка", "Internet Archive и Openverse", c1) { onlineSheet() }
+
+        val db = sCard("Данные")
+        srow(db, P.CHART, "Статистика и итоги", "День, неделя, год", c1) { recap() }
+        srow(db, P.UPLOAD, "Резервная копия в файл", "Сохранится в Загрузки", c2) { backup() }
+        srow(db, P.DOWNLOAD, "Восстановить из файла", "Из резервной копии", c1) { restore() }
+        srow(db, P.UPLOAD, "Экспорт плейлистов", "Текстом, чтобы отправить", c2) { exportPls() }
+        srow(db, P.DOWNLOAD, "Импорт плейлистов", "Вставить текст экспорта", c1) { importPls() }
+    }
+
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
@@ -1519,6 +1832,7 @@ class MainActivity : Activity() {
         val th = themes[ti]
         val cu = ti == themes.size - 1
         c1 = if (cu) customAcc else Color.parseColor(th.acc)
+        c2 = if (cu) customAcc else Color.parseColor(th.acc2.ifEmpty { th.acc })
         base = if (cu) customBg else Color.parseColor(th.bg)
         dark = if (cu) androidx.core.graphics.ColorUtils.calculateLuminance(customBg) < 0.5 else th.dark
         onAcc = if (androidx.core.graphics.ColorUtils.calculateLuminance(c1) > 0.45) Color.BLACK else Color.WHITE
@@ -1534,7 +1848,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, base, base))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, mix(c2, 0.12f), base))
         }
         topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(8), dp(8), dp(4)) }
         rootV = root
@@ -1548,7 +1862,7 @@ class MainActivity : Activity() {
 
         val side = resources.displayMetrics.widthPixels - dp(48)
         val box = FrameLayout(this).apply {
-            background = rr(mix(c1, 0.55f), 12)
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(mix(c1, 0.6f), mix(c2, 0.6f))).apply { cornerRadius = dp(12).toFloat() }
             clipToOutline = true
             elevation = dp(18).toFloat()
         }
@@ -1593,7 +1907,7 @@ class MainActivity : Activity() {
                             true
                         } else false
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val was = dragIdx >= 0; dragIdx = -1; trackAdapter.notifyDataSetChanged(); was }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { val was = dragIdx >= 0; if (was) { dragIdx = -1; trackAdapter.notifyDataSetChanged() }; was }
                     else -> false
                 }
             }
@@ -1663,9 +1977,16 @@ class MainActivity : Activity() {
         panel.addView(row2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         root.addView(panel, LinearLayout.LayoutParams(-1, -2))
         panelV = panel
-        for ((k, w) in webs) { (w.parent as? ViewGroup)?.removeView(w); root.addView(w, LinearLayout.LayoutParams(-1, 0, 1f)); w.visibility = if (ytMode && k == webKind) View.VISIBLE else View.GONE }
-        listView.visibility = if (ytMode) View.GONE else View.VISIBLE
-        panel.visibility = if (ytMode) View.GONE else View.VISIBLE
+        settingsPage = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        settingsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(24)) }
+        settingsPage.addView(settingsBox)
+        root.addView(settingsPage, LinearLayout.LayoutParams(-1, 0, 1f))
+        for ((_, w) in webs) { (w.parent as? ViewGroup)?.removeView(w); root.addView(w, LinearLayout.LayoutParams(-1, 0, 1f)) }
+        navBar = LinearLayout(this).apply { setPadding(dp(12), dp(8), dp(12), dp(8)); background = ColorDrawable(panelCol); elevation = dp(16).toFloat() }
+        root.addView(navBar, LinearLayout.LayoutParams(-1, -2))
+        renderSettings()
+        refreshNav()
+        applyVisibility()
         setContentView(root)
         refreshTop()
     }
