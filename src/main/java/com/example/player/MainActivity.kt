@@ -190,8 +190,6 @@ class MainActivity : Activity() {
     private var fVal = ""
     private val plays = HashMap<Long, Int>()
     private val hist = ArrayList<Long>()
-    private var eq: android.media.audiofx.Equalizer? = null
-    private var bass: android.media.audiofx.BassBoost? = null
     private var rootV: View? = null
     private var fadeSec = 0
     private var skipSil = false
@@ -358,7 +356,6 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
-        eq?.release(); bass?.release()
         for (w in webs.values) w.destroy()
         dlReceiver?.let { try { unregisterReceiver(it) } catch (e: Exception) { } }
         (player as? MediaController)?.release()
@@ -708,7 +705,6 @@ class MainActivity : Activity() {
             row(P.SORT, "Сортировка") { sortSheet() },
             row(P.BOLT, "Скорость воспроизведения") { speedDialog() },
             row(P.TIMER, "Таймер сна") { sleepDialog() },
-            row(P.EQ, "Эквалайзер и бас") { eqDialog() },
             row(P.GLOBE, "Бесплатная музыка") { onlineSheet() },
             row(P.CHART, "Итоги недели и года") { recap() },
             row(P.BOLT, "Плавный переход между треками") { fadeSheet() },
@@ -836,53 +832,6 @@ class MainActivity : Activity() {
         val top = plays.entries.sortedByDescending { it.value }.take(10).mapNotNull { e -> all.find { it.id == e.key }?.let { it.title + " — " + e.value } }
         val msg = "Всего прослушиваний: " + plays.values.sum() + "\n\n" + (if (top.isEmpty()) "Пока пусто" else top.joinToString("\n"))
         AlertDialog.Builder(this).setTitle("Статистика").setMessage(msg).setPositiveButton("OK", null).show()
-    }
-
-    private fun eqDialog() {
-        val sid = Audio.session
-        if (sid == 0) { toast("Сначала включите любой трек"); return }
-        try {
-            if (eq == null) {
-                val q = android.media.audiofx.Equalizer(0, sid)
-                q.enabled = true
-                for (b in 0 until q.numberOfBands.toInt()) { val v = prefs.getInt("eq" + b, Int.MIN_VALUE); if (v != Int.MIN_VALUE) q.setBandLevel(b.toShort(), v.toShort()) }
-                eq = q
-            }
-            if (bass == null) {
-                val x = android.media.audiofx.BassBoost(0, sid)
-                x.enabled = true
-                x.setStrength(prefs.getInt("bass", 0).toShort())
-                bass = x
-            }
-        } catch (e: Exception) { toast("Эквалайзер недоступен на этом устройстве"); return }
-        val q = eq!!
-        val lay = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)) }
-        val lo = q.bandLevelRange[0].toInt()
-        val hi = q.bandLevelRange[1].toInt()
-        for (b in 0 until q.numberOfBands.toInt()) {
-            val band = b.toShort()
-            lay.addView(TextView(this).apply { text = (q.getCenterFreq(band) / 1000).toString() + " Гц"; setTextColor(grey) })
-            lay.addView(SeekBar(this).apply {
-                max = hi - lo
-                progress = q.getBandLevel(band) - lo
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) { if (u) { q.setBandLevel(band, (p + lo).toShort()); prefs.edit().putInt("eq" + b, p + lo).apply() } }
-                    override fun onStartTrackingTouch(s: SeekBar) {}
-                    override fun onStopTrackingTouch(s: SeekBar) {}
-                })
-            })
-        }
-        lay.addView(TextView(this).apply { text = "Бас"; setTextColor(grey) })
-        lay.addView(SeekBar(this).apply {
-            max = 1000
-            progress = prefs.getInt("bass", 0)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar, p: Int, u: Boolean) { if (u) { bass?.setStrength(p.toShort()); prefs.edit().putInt("bass", p).apply() } }
-                override fun onStartTrackingTouch(s: SeekBar) {}
-                override fun onStopTrackingTouch(s: SeekBar) {}
-            })
-        })
-        AlertDialog.Builder(this).setTitle("Эквалайзер").setView(ScrollView(this).apply { addView(lay) }).setPositiveButton("Готово", null).show()
     }
 
     private fun exportPls() {
