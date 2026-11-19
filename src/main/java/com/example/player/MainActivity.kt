@@ -99,6 +99,14 @@ class Ic(ctx: Context, d: String, private var color: Int, private val k: Float =
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     fun setIcon(d: String) { path = parse(d); invalidate() }
     fun tint(c: Int) { color = c; invalidate() }
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (isClickable) when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> animate().scaleX(0.86f).scaleY(0.86f).setDuration(90).start()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+        }
+        return super.onTouchEvent(e)
+    }
+
     override fun onDraw(c: Canvas) {
         paint.color = color
         val s = minOf(width, height) * k / 24f
@@ -194,6 +202,7 @@ class MainActivity : Activity() {
     private var fadeSec = 0
     private var skipSil = false
     private val daily = HashMap<String, Long>()
+    private val dplays = HashMap<String, HashMap<Long, Int>>()
     private var saveCnt = 0
     private var dlReceiver: android.content.BroadcastReceiver? = null
     private var npRefresh: (() -> Unit)? = null
@@ -312,6 +321,10 @@ class MainActivity : Activity() {
         fadeSec = prefs.getInt("fade", 0)
         skipSil = prefs.getBoolean("skip", false)
         try { val o = JSONObject(prefs.getString("daily", "{}") ?: "{}"); for (k in o.keys()) daily[k] = o.getLong(k) } catch (e: Exception) { }
+        try {
+            val o = JSONObject(prefs.getString("dplays", "{}") ?: "{}")
+            for (k in o.keys()) { val m = HashMap<Long, Int>(); val q = o.getJSONObject(k); for (id in q.keys()) m[id.toLong()] = q.getInt(id); dplays[k] = m }
+        } catch (e: Exception) { }
         sortMode = prefs.getInt("sort", 0)
         try { (prefs.getString("favs", "") ?: "").split(",").filter { it.isNotEmpty() }.forEach { favs.add(it.toLong()) } } catch (e: Exception) { }
         try { val o = JSONObject(prefs.getString("plays", "{}") ?: "{}"); for (k in o.keys()) plays[k.toLong()] = o.getInt(k) } catch (e: Exception) { }
@@ -386,8 +399,10 @@ class MainActivity : Activity() {
         nowArtist.text = m?.mediaMetadata?.artist ?: ""
         playIc.setIcon(if (p.isPlaying) P.PAUSE else P.PLAY)
         shufIc.tint(if (p.shuffleModeEnabled) c1 else grey)
+        shufIc.background = if (p.shuffleModeEnabled) oval(Color.argb(45, Color.red(c1), Color.green(c1), Color.blue(c1))) else null
         repIc.setIcon(if (p.repeatMode == Player.REPEAT_MODE_ONE) P.REPEAT_ONE else P.REPEAT)
         repIc.tint(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else grey)
+        repIc.background = if (p.repeatMode != Player.REPEAT_MODE_OFF) oval(Color.argb(45, Color.red(c1), Color.green(c1), Color.blue(c1))) else null
         heartIc.tint(if (favs.contains(m?.mediaId?.toLongOrNull() ?: -1L)) c1 else grey)
         val sp = p.playbackParameters.speed
         speedTv.text = (if (sp % 1f == 0f) sp.toInt().toString() else sp.toString()) + "×"
@@ -505,7 +520,7 @@ class MainActivity : Activity() {
     private fun refreshTop() {
         topBar.removeAllViews()
         fun btn(d: String, f: () -> Unit) = topBar.addView(
-            Ic(this, d, white, 0.5f).apply { setOnClickListener { f() } }, LinearLayout.LayoutParams(dp(46), dp(46)))
+            Ic(this, d, white, 0.5f).apply { background = oval(card); setOnClickListener { f() } }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) })
         if (ytMode) {
             btn(P.BACK) { if (web?.canGoBack() == true) web?.goBack() else setYt(false) }
             if (webKind == "yt") {
@@ -536,7 +551,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
             val yt = FrameLayout(this).apply { setOnClickListener { openWeb("yt") } }
             yt.addView(Ic(this, P.PLAY, Color.WHITE, 0.55f).apply { background = rr(Color.parseColor("#FF0033"), 8) }, FrameLayout.LayoutParams(dp(34), dp(24), Gravity.CENTER))
-            topBar.addView(yt, LinearLayout.LayoutParams(dp(48), dp(46)))
+            topBar.addView(pressable(yt), LinearLayout.LayoutParams(dp(46), dp(40)).apply { leftMargin = dp(6) })
             btn(P.GLOBE) { openWeb("br") }
             btn(P.SEARCH) { ask("Поиск", query) { q -> query = q; refreshTabs(); refreshList() } }
             btn(P.MENU) { selecting = true; sel.clear(); refreshTop(); trackAdapter.notifyDataSetChanged() }
@@ -592,10 +607,10 @@ class MainActivity : Activity() {
         val d = android.app.Dialog(this)
         val box = sheetBox(title)
         for ((ic, label, f) in rows) {
-            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), 0, dp(14), 0); setOnClickListener { d.dismiss(); f() } }
+            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), 0, dp(14), 0); background = rr(Color.argb(if (dark) 22 else 16, 128, 128, 128), 14); setOnClickListener { d.dismiss(); f() }; pressable(this) }
             line.addView(Ic(this, ic, c1, 0.6f), LinearLayout.LayoutParams(dp(40), dp(52)))
             line.addView(TextView(this).apply { text = label; textSize = 16f; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(10) })
-            box.addView(line, LinearLayout.LayoutParams(-1, dp(52)))
+            box.addView(line, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(3); bottomMargin = dp(3) })
         }
         present(d, box)
     }
@@ -665,10 +680,14 @@ class MainActivity : Activity() {
     }
 
     private fun confirmDelete(ids: List<Long>) {
-        AlertDialog.Builder(this).setTitle("Удалить с устройства?")
-            .setMessage("Файлов: " + ids.size + ". Это нельзя отменить.")
-            .setPositiveButton("Удалить") { _, _ -> doDelete(ids) }
-            .setNegativeButton("Отмена", null).show()
+        val d = android.app.Dialog(this)
+        val box = sheetBox("Удалить с устройства?")
+        box.addView(TextView(this).apply { text = "Файлов: " + ids.size + ". Это нельзя отменить."; textSize = 15f; setTextColor(grey); setPadding(dp(14), 0, dp(14), dp(14)) })
+        val btns = LinearLayout(this).apply { gravity = Gravity.END }
+        btns.addView(chip("Отмена", false) { d.dismiss() })
+        btns.addView(ichip(P.DELETE, "Удалить", true) { d.dismiss(); doDelete(ids) }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        box.addView(btns, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(8), 0, dp(8), 0) })
+        present(d, box)
     }
 
     private fun doDelete(ids: List<Long>) {
@@ -693,10 +712,21 @@ class MainActivity : Activity() {
     }
 
     private fun ask(title: String, init: String, ok: (String) -> Unit) {
-        val e = EditText(this).apply { setText(init) }
-        AlertDialog.Builder(this).setTitle(title).setView(e)
-            .setPositiveButton("Готово") { _, _ -> val n = e.text.toString().trim(); if (n.isNotEmpty()) ok(n) }
-            .setNegativeButton("Отмена", null).show()
+        val d = android.app.Dialog(this)
+        val box = sheetBox(title)
+        val et = EditText(this).apply {
+            setText(init); setSingleLine(); setTextColor(white); setHintTextColor(grey); textSize = 16f
+            setPadding(dp(16), dp(12), dp(16), dp(12)); background = rr(card, 16)
+            setSelection(text.length)
+        }
+        box.addView(et, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(8), dp(4), dp(8), dp(14)) })
+        val btns = LinearLayout(this).apply { gravity = Gravity.END }
+        btns.addView(chip("Отмена", false) { d.dismiss() })
+        btns.addView(ichip(P.CHECK, "Готово", true) { val n = et.text.toString().trim(); if (n.isNotEmpty()) { d.dismiss(); ok(n) } }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        box.addView(btns, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(8), 0, dp(8), 0) })
+        present(d, box)
+        d.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        et.requestFocus()
     }
 
     private fun settings() {
@@ -777,17 +807,28 @@ class MainActivity : Activity() {
     }
 
     private fun info(t: Track) {
-        var msg = t.title + "\n" + t.artist
+        val lines = ArrayList<Pair<String, String>>()
+        lines.add(Pair("Название", t.title))
+        lines.add(Pair("Исполнитель", t.artist.ifEmpty { "—" }))
         try {
             val c = contentResolver.query(uriOf(t.id), arrayOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.MIME_TYPE, MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.DATA), null, null, null)
             if (c != null) {
                 if (c.moveToFirst()) {
-                    msg = "Файл: " + c.getString(0) + "\nФормат: " + c.getString(2) + "\nРазмер: " + String.format("%.1f МБ", c.getLong(1) / 1048576.0) + "\nДлительность: " + fmt(c.getLong(3)) + "\nПуть: " + c.getString(4)
+                    lines.add(Pair("Файл", c.getString(0) ?: ""))
+                    lines.add(Pair("Формат", c.getString(2) ?: ""))
+                    lines.add(Pair("Размер", String.format("%.1f МБ", c.getLong(1) / 1048576.0)))
+                    lines.add(Pair("Длительность", fmt(c.getLong(3))))
+                    lines.add(Pair("Путь", c.getString(4) ?: ""))
                 }
                 c.close()
             }
         } catch (e: Exception) { }
-        AlertDialog.Builder(this).setTitle("Информация").setMessage(msg).setPositiveButton("OK", null).show()
+        val box = sheetBox("Информация")
+        for ((k, v) in lines) {
+            box.addView(TextView(this).apply { text = k; textSize = 12f; setTextColor(grey); setPadding(dp(14), dp(8), dp(14), 0) })
+            box.addView(TextView(this).apply { text = v; textSize = 15f; setTextColor(white); setPadding(dp(14), 0, dp(14), dp(4)) })
+        }
+        present(android.app.Dialog(this), box)
     }
 
     private fun tintTop(px: Int?) {
@@ -796,14 +837,24 @@ class MainActivity : Activity() {
         window.statusBarColor = t
     }
 
+    private fun dayKey(off: Int = 0): String {
+        val c = java.util.Calendar.getInstance()
+        c.add(java.util.Calendar.DAY_OF_YEAR, -off)
+        return java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(c.time)
+    }
+
     private fun countPlay(id: Long) {
         plays[id] = (plays[id] ?: 0) + 1
         hist.remove(id)
         hist.add(0, id)
         while (hist.size > 50) hist.removeAt(hist.size - 1)
+        val dm = dplays.getOrPut(dayKey()) { HashMap() }
+        dm[id] = (dm[id] ?: 0) + 1
         val o = JSONObject()
         for ((k, v) in plays) o.put(k.toString(), v)
-        prefs.edit().putString("plays", o.toString()).putString("hist", hist.joinToString(",")).apply()
+        val dj = JSONObject()
+        for ((day, m) in dplays) { val x = JSONObject(); for ((i, n) in m) x.put(i.toString(), n); dj.put(day, x) }
+        prefs.edit().putString("plays", o.toString()).putString("hist", hist.joinToString(",")).putString("dplays", dj.toString()).apply()
     }
 
     private fun autoName(k: String) = when (k) { REC -> "Недавно добавленные"; TOP -> "Часто слушаемые"; else -> "История" }
@@ -824,7 +875,7 @@ class MainActivity : Activity() {
             row(P.NOTE, "Недавно добавленные") { go(REC) },
             row(P.CHART, "Часто слушаемые") { go(TOP) },
             row(P.HISTORY, "История") { go(HIST) },
-            row(P.INFO, "Статистика") { stats() }
+            row(P.CHART, "Статистика и итоги") { recap() }
         ))
     }
 
@@ -861,6 +912,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(4), dp(16), dp(4))
             background = rr(if (on) c1 else card, 20)
             setOnClickListener { f() }
+            pressable(this)
         }
         lay.addView(Ic(this, icon, if (on) onAcc else white, 0.9f), LinearLayout.LayoutParams(dp(22), dp(22)))
         lay.addView(TextView(this).apply { text = t; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(if (on) onAcc else white) }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(4) })
@@ -1096,7 +1148,7 @@ class MainActivity : Activity() {
         }
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
         for ((v, sz) in listOf(Pair<View, Int>(shuf, 48), Pair<View, Int>(prev, 56), Pair<View, Int>(play, 70), Pair<View, Int>(next, 56), Pair<View, Int>(rep, 48)))
-            row.addView(v, LinearLayout.LayoutParams(dp(sz), dp(sz)).apply { leftMargin = dp(8); rightMargin = dp(8) })
+            { if (sz in 50..60) v.background = oval(card); row.addView(v, LinearLayout.LayoutParams(dp(sz), dp(sz)).apply { leftMargin = dp(8); rightMargin = dp(8) }) }
         col.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
 
         var shown0: android.graphics.Bitmap? = null
@@ -1108,8 +1160,10 @@ class MainActivity : Activity() {
                 artist.text = m?.mediaMetadata?.artist ?: ""
                 play.setIcon(if (p.isPlaying) P.PAUSE else P.PLAY)
                 shuf.tint(if (p.shuffleModeEnabled) c1 else grey)
+                shuf.background = if (p.shuffleModeEnabled) oval(Color.argb(45, Color.red(c1), Color.green(c1), Color.blue(c1))) else null
                 rep.setIcon(if (p.repeatMode == Player.REPEAT_MODE_ONE) P.REPEAT_ONE else P.REPEAT)
                 rep.tint(if (p.repeatMode != Player.REPEAT_MODE_OFF) c1 else grey)
+                rep.background = if (p.repeatMode != Player.REPEAT_MODE_OFF) oval(Color.argb(45, Color.red(c1), Color.green(c1), Color.blue(c1))) else null
                 heart.tint(if (favs.contains(m?.mediaId?.toLongOrNull() ?: -1L)) c1 else grey)
                 aura.active = p.isPlaying
                 if (!npDrag && p.duration > 0) {
@@ -1192,42 +1246,109 @@ class MainActivity : Activity() {
         nowArtist.animate().alpha(1f).setDuration(450).start()
     }
 
-    private fun hours(ms: Long): String = String.format("%d ч %02d мин", ms / 3600000, (ms / 60000) % 60)
+    private fun hours(ms: Long): String =
+        if (ms < 60000) (ms / 1000).toString() + " сек" else if (ms < 3600000) (ms / 60000).toString() + " мин" else String.format("%d ч %02d мин", ms / 3600000, (ms / 60000) % 60)
 
-    private fun recap() {
-        val fk = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
-        val days = ArrayList<Long>()
-        val labels = ArrayList<String>()
-        var week = 0L
-        for (i in 6 downTo 0) {
-            val c = java.util.Calendar.getInstance()
-            c.add(java.util.Calendar.DAY_OF_YEAR, -i)
-            val ms = daily[fk.format(c.time)] ?: 0L
-            days.add(ms); week += ms
-            labels.add(c.get(java.util.Calendar.DAY_OF_MONTH).toString())
-        }
-        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
-        val yearMs = daily.filter { it.key.startsWith(year) }.values.sum()
-        val topTrack = plays.entries.maxByOrNull { it.value }?.let { e -> all.find { it.id == e.key }?.title }
-        val byArtist = HashMap<String, Int>()
-        for ((id, n) in plays) all.find { it.id == id }?.let { if (it.artist.isNotEmpty()) byArtist[it.artist] = (byArtist[it.artist] ?: 0) + n }
-        val topArtist = byArtist.entries.maxByOrNull { it.value }?.key
+    private fun recap(mode: Int = 0) {
+        val d = android.app.Dialog(this)
         val box = sheetBox("Итоги")
-        fun line(t: String) = box.addView(TextView(this).apply { text = t; textSize = 16f; setTextColor(white); setPadding(dp(14), dp(4), dp(14), dp(4)) })
-        line("За 7 дней: " + hours(week))
-        line("За " + year + " год: " + hours(yearMs))
-        line("Любимый трек: " + (topTrack ?: "пока нет"))
-        line("Любимый исполнитель: " + (topArtist ?: "пока нет"))
-        val bars = LinearLayout(this).apply { gravity = Gravity.BOTTOM; setPadding(dp(14), dp(14), dp(14), 0) }
-        val mx = maxOf(1L, days.maxOrNull() ?: 1L)
-        for (i in days.indices) {
-            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-            col.addView(View(this).apply { background = rr(c1, 4) }, LinearLayout.LayoutParams(dp(18), maxOf(dp(4), (dp(90) * days[i] / mx).toInt())))
-            col.addView(TextView(this).apply { text = labels[i]; textSize = 11f; setTextColor(grey); gravity = Gravity.CENTER })
-            bars.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        val seg = LinearLayout(this).apply { background = rr(card, 22); setPadding(dp(4), dp(4), dp(4), dp(4)) }
+        val names = listOf("День", "Неделя", "Год")
+        for (i in names.indices) {
+            seg.addView(TextView(this).apply {
+                text = names[i]; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+                setTextColor(if (i == mode) onAcc else white)
+                if (i == mode) background = rr(c1, 18)
+                setPadding(0, dp(9), 0, dp(9))
+                setOnClickListener { d.dismiss(); recap(i) }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
         }
-        box.addView(bars, LinearLayout.LayoutParams(-1, -2))
-        present(android.app.Dialog(this), box)
+        box.addView(seg, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(8), 0, dp(8), dp(14)) })
+
+        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
+        val wd = listOf("вс", "пн", "вт", "ср", "чт", "пт", "сб")
+        val labels = ArrayList<String>()
+        val vals = ArrayList<Long>()
+        val dayNames = ArrayList<String>()
+        var total = 0L
+        val counts = HashMap<Long, Int>()
+        fun addDay(k: String) { val m = dplays[k]; if (m != null) for ((id, n) in m) counts[id] = (counts[id] ?: 0) + n }
+        if (mode == 0) {
+            total = daily[dayKey(0)] ?: 0L
+            addDay(dayKey(0))
+        } else if (mode == 1) {
+            for (i in 6 downTo 0) {
+                val c = java.util.Calendar.getInstance()
+                c.add(java.util.Calendar.DAY_OF_YEAR, -i)
+                val k = dayKey(i)
+                val ms = daily[k] ?: 0L
+                total += ms; vals.add(ms); addDay(k)
+                val nm = wd[c.get(java.util.Calendar.DAY_OF_WEEK) - 1]
+                labels.add(nm); dayNames.add(nm + ", " + c.get(java.util.Calendar.DAY_OF_MONTH))
+            }
+        } else {
+            for (m in 1..12) {
+                val pre = year + String.format("%02d", m)
+                val ms = daily.filter { it.key.startsWith(pre) }.values.sum()
+                total += ms; vals.add(ms); labels.add(m.toString())
+            }
+            for (k in dplays.keys) if (k.startsWith(year)) addDay(k)
+        }
+        val yest = daily[dayKey(1)] ?: 0L
+        val sub = when (mode) { 0 -> "Сегодня" + (if (yest > 0) " · вчера " + hours(yest) else ""); 1 -> "За последние 7 дней"; else -> "За " + year + " год" }
+        val byArtist = HashMap<String, Int>()
+        for ((id, n) in counts) all.find { it.id == id }?.let { if (it.artist.isNotEmpty()) byArtist[it.artist] = (byArtist[it.artist] ?: 0) + n }
+        val topArtist = byArtist.entries.maxByOrNull { it.value }?.key
+
+        box.addView(TextView(this).apply { text = hours(total); textSize = 34f; typeface = Typeface.DEFAULT_BOLD; setTextColor(c1); setPadding(dp(14), 0, dp(14), 0) })
+        box.addView(TextView(this).apply { text = sub; textSize = 14f; setTextColor(grey); setPadding(dp(14), 0, dp(14), dp(4)) })
+        if (topArtist != null) box.addView(TextView(this).apply { text = "Любимый исполнитель: " + topArtist; textSize = 14f; setTextColor(white); setPadding(dp(14), dp(2), dp(14), dp(2)) })
+
+        fun head(t: String) = box.addView(TextView(this).apply { text = t; textSize = 16f; typeface = Typeface.DEFAULT_BOLD; setTextColor(white); setPadding(dp(14), dp(18), dp(14), dp(6)) })
+        fun rankRow(n: Int, title: String, subt: String, right: String, frac: Float) {
+            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(6), dp(14), dp(6)) }
+            val medal = when (n) { 1 -> "#FFC107"; 2 -> "#B0BEC5"; 3 -> "#CD7F32"; else -> null }
+            line.addView(TextView(this).apply {
+                text = n.toString(); textSize = 14f; typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+                setTextColor(if (medal != null) Color.BLACK else white)
+                background = oval(if (medal != null) Color.parseColor(medal) else card)
+            }, LinearLayout.LayoutParams(dp(32), dp(32)))
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(TextView(this).apply { text = title; textSize = 15f; setTextColor(white); setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+            if (subt.isNotEmpty()) col.addView(TextView(this).apply { text = subt; textSize = 12f; setTextColor(grey); setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+            val pb = LinearLayout(this).apply { weightSum = 1000f; background = rr(card, 3) }
+            pb.addView(View(this).apply { background = rr(c1, 3) }, LinearLayout.LayoutParams(0, -1, maxOf(frac, 0.03f) * 1000f))
+            col.addView(pb, LinearLayout.LayoutParams(-1, dp(5)).apply { topMargin = dp(5) })
+            line.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12); rightMargin = dp(12) })
+            line.addView(TextView(this).apply { text = right; textSize = 13f; typeface = Typeface.DEFAULT_BOLD; setTextColor(c1) })
+            box.addView(line)
+        }
+
+        if (vals.isNotEmpty()) {
+            val mx = maxOf(1L, vals.maxOrNull() ?: 1L)
+            val hi = if (mode == 1) vals.size - 1 else java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)
+            val bars = LinearLayout(this).apply { gravity = Gravity.BOTTOM; setPadding(dp(14), dp(12), dp(14), dp(4)) }
+            for (i in vals.indices) {
+                val colv = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+                val h = maxOf(dp(4), (dp(100) * vals[i] / mx).toInt())
+                colv.addView(View(this).apply { background = rr(if (i == hi) c1 else Color.argb(110, Color.red(c1), Color.green(c1), Color.blue(c1)), 5) }, LinearLayout.LayoutParams(dp(if (mode == 1) 22 else 14), h))
+                colv.addView(TextView(this).apply { text = labels[i]; textSize = 11f; setTextColor(if (i == hi) white else grey); gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
+                bars.addView(colv, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            box.addView(bars, LinearLayout.LayoutParams(-1, -2))
+        }
+        if (mode == 1) {
+            val order = vals.indices.filter { vals[it] > 0 }.sortedByDescending { vals[it] }.take(3)
+            if (order.isNotEmpty()) {
+                head("Лучшие дни")
+                order.forEachIndexed { r, i -> rankRow(r + 1, dayNames[i], "", hours(vals[i]), vals[i].toFloat() / vals[order[0]]) }
+            }
+        }
+        head(when (mode) { 0 -> "Рейтинг дня"; 1 -> "Рейтинг недели"; else -> "Рейтинг года" })
+        val top = counts.entries.sortedByDescending { it.value }.mapNotNull { e -> all.find { it.id == e.key }?.let { Pair(it, e.value) } }.take(if (mode == 0) 10 else 5)
+        if (top.isEmpty()) box.addView(TextView(this).apply { text = "Пока нет данных. Включи музыку, и здесь появится рейтинг."; textSize = 14f; setTextColor(grey); setPadding(dp(14), dp(4), dp(14), dp(4)) })
+        else top.forEachIndexed { r, p -> rankRow(r + 1, p.first.title, p.first.artist, p.second.toString() + "×", p.second.toFloat() / top[0].second) }
+        present(d, box)
     }
 
     private fun backup() {
@@ -1365,6 +1486,24 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private fun pressable(v: View): View {
+        v.setOnTouchListener { x, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> x.animate().scaleX(0.95f).scaleY(0.95f).setDuration(90).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> x.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+            }
+            false
+        }
+        return v
+    }
+
+    private fun oval(c: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c) }
+
+    private fun glow(v: View, color: Int, elev: Int) {
+        v.elevation = dp(elev).toFloat()
+        if (Build.VERSION.SDK_INT >= 28) { v.outlineAmbientShadowColor = color; v.outlineSpotShadowColor = color }
+    }
+
     private fun rebuild() { coverId = -2L; build(); refreshTabs(); refreshList(); updateNow() }
 
     private fun chip(t: String, on: Boolean, f: () -> Unit) = TextView(this).apply {
@@ -1373,6 +1512,7 @@ class MainActivity : Activity() {
         setPadding(dp(16), dp(8), dp(16), dp(8))
         background = rr(if (on) c1 else card, 20)
         setOnClickListener { f() }
+        pressable(this)
     }
 
     private fun build() {
@@ -1493,6 +1633,7 @@ class MainActivity : Activity() {
         shufIc = Ic(this, P.SHUFFLE, grey, 0.55f).apply { setOnClickListener { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } } }
         val prev = Ic(this, P.PREV, white, 0.6f).apply { setOnClickListener { player?.seekToPrevious() } }
         playIc = Ic(this, P.PLAY, base, 0.55f).apply {
+            glow(this, c1, 12)
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(white) }
             setOnClickListener { player?.let { if (it.isPlaying) it.pause() else it.play() } }
         }
@@ -1509,7 +1650,7 @@ class MainActivity : Activity() {
             }
         }
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        fun cell(v: View, s: Int) = row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(8); rightMargin = dp(8) })
+        fun cell(v: View, s: Int) { if (s in 50..60) v.background = oval(card); row.addView(v, LinearLayout.LayoutParams(dp(s), dp(s)).apply { leftMargin = dp(8); rightMargin = dp(8) }) }
         cell(shufIc, 48); cell(prev, 56); cell(playIc, 66); cell(next, 56); cell(repIc, 48)
         panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         val row2 = LinearLayout(this).apply { gravity = Gravity.CENTER }
